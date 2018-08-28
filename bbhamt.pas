@@ -51,6 +51,7 @@ end;  }
       class procedure decrementRefCount(a: PHAMTArray); static;
       procedure incrementChildrenRefCount;
       function indexOf(const key: TKey): integer;
+      function find(const key: TKey): PPair;
     end;
 
     protected
@@ -71,6 +72,7 @@ end;  }
     class function allocate(apointerCount, apairCount: integer): PHAMTNode; static;
   public
     class procedure insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; out overriden: boolean); static;
+    function find(const key:TKey): PPair;
     function contains(const key:TKey):boolean;
     function get(const key: TKey; const def: TValue): TValue;
   end;
@@ -95,7 +97,7 @@ end;  }
 implementation
 
 const LEVEL_HIGH = 5;
-
+      BITS_PER_LEVEL = 5;
 
 class function TInfo.hash(const s: TKey): THAMTHash;
 var
@@ -153,7 +155,7 @@ end;
 procedure hashShift(var hash: THAMTHash; out index: THAMTHash); inline;
 begin
   index := hash and %11111;
-  hash := hash shr 5;
+  hash := hash shr BITS_PER_LEVEL;
 end;
 
 function bitmapCountBeforeIndex(const bitmapAll: Cardinal; index: THAMTHash): DWord; inline;
@@ -219,6 +221,15 @@ begin
       exit(i);
     end;
   result := -1;
+end;
+
+function THAMTNode.THAMTArray.find(const key: TKey): PPair;
+var
+  index: Integer;
+begin
+  index := indexOf(key);
+  if index >= 0 then result := @data[index]
+  else result := nil;
 end;
 
 function THAMTTaggedPointer.unpack(out isArray: boolean): pointer; inline;
@@ -440,7 +451,7 @@ begin
   end;
 end;
 
-function THAMTNode.contains(const key: TKey): boolean;
+function THAMTNode.find(const key: TKey): PPair;
 var
   node: PHAMTNode;
   i: Integer;
@@ -455,49 +466,33 @@ begin
     if node.bitmapIsSinglePointer.bits[index] then begin
       rawPointer := node.pointers[getPointerOffset(index)].unpack(pointerIsArray);
       if pointerIsArray then
-        exit(PHAMTArray(rawPointer).indexOf(key) >= 0)
+        exit(PHAMTArray(rawPointer).find(key))
        else
         node := PHAMTNode(rawPointer)
     end else if node.bitmapIsValue.bits[index] then begin
-      exit(TInfo.equal(node.getPairAddr(index).key, key));
+      result := node.getPairAddr(index);
+      if not TInfo.equal(result.key, key) then result := nil;
+      exit;
     end else
-      exit(false);
+      exit(nil);
   end;
-  result := false;
+  result := nil;
+end;
+
+function THAMTNode.contains(const key: TKey): boolean;
+begin
+  result := find(key) <> nil;
 end;
 
 function THAMTNode.get(const key: TKey; const def: TValue): TValue;
 var
-  node: PHAMTNode;
-  i, arrayIndex: Integer;
-  h, index: THAMTHash;
   pair: PPair;
   rawPointer: Pointer;
   pointerIsArray: boolean;
 begin
-  node := @self;
-  h := TInfo.hash(key);
-  for i := 0 to LEVEL_HIGH do begin
-    hashShift(h, index);
-    if node.bitmapIsSinglePointer.bits[index] then begin
-      rawPointer := node.pointers[getPointerOffset(index)].unpack(pointerIsArray);
-      if pointerIsArray then begin
-        arrayIndex := PHAMTArray(rawPointer).indexOf(key);
-        if arrayIndex >= 0 then result := PHAMTArray(rawPointer).data[arrayIndex].value
-        else result := def;
-        exit;
-      end else begin
-        node := PHAMTNode(rawPointer)
-      end;
-    end else if node.bitmapIsValue.bits[index] then begin
-      pair := node.getPairAddr(index);
-      if TInfo.equal(pair.key, key) then result := pair.value
-      else result := def;
-      exit
-    end else
-      exit(def);
-  end;
-  result := def;
+  pair := find(key);
+  if pair = nil then result := def
+  else result := pair.value;
 end;
 
 end.
