@@ -54,7 +54,7 @@ end;  }
       function find(const key: TKey): PPair;
     end;
 
-    protected
+  protected
     refCount: Integer;
     pointerCount, pairCount: word;
     bitmapIsSinglePointer: THAMTBitmap;
@@ -71,12 +71,19 @@ end;  }
     class procedure decrementRefCount(node: PHAMTNode); static;
     class function allocate(apointerCount, apairCount: integer): PHAMTNode; static;
   public
-    class procedure insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; out overriden: boolean); static;
+    class function insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; allowOverride: boolean): Boolean; static;
     function find(const key:TKey): PPair;
     function contains(const key:TKey):boolean;
     function get(const key: TKey; const def: TValue): TValue;
   end;
-
+{
+//insert override allowed = true
+  result = true                  inserted, no override
+  result = false                 inserted, override
+//insert override forbidden = false
+  result = true                  inserted, (no override)
+  result = false                 not inserted
+}
   THAMTTypeInfo = object
     class function hash(const s: TKey): THAMTHash;
     class function equal(const s, t: TKey): boolean;
@@ -88,6 +95,19 @@ end;  }
   end;
   TInfo = type THAMTTypeInfo;
 
+  THAMT = object
+  protected
+    fcount: SizeInt;
+    froot: PHAMTNode;
+  public
+    property count: SizeInt read fcount;
+    procedure init;
+    function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean;
+    function contains(const key:TKey): boolean; inline;
+    function get(const key: TKey; const def: TValue): TValue; inline;
+    function snapshot: THAMT;
+    procedure release;
+  end;
 
 {  THAMTStringString = class
 
@@ -96,20 +116,34 @@ end;  }
 
 implementation
 
-const LEVEL_HIGH = 5;
-      BITS_PER_LEVEL = 5;
+const
+  BITS_PER_LEVEL = 5;
+  LEVEL_HIGH = ( sizeof(THAMTHash) * 8 ) div BITS_PER_LEVEL;
+
 
 class function TInfo.hash(const s: TKey): THAMTHash;
 var
   p, last: PByte;
 begin
   if s = '' then exit(1);
-  case s of
-  'test', 'collision+1', 'collision+2', 'collision+3': exit(hash('collision'));
-  end;
   p := pbyte(pointer(s));
   last := p + length(s);
   result := 0;
+
+  //testing cases
+  case s of
+  'test', 'collision+1', 'collision+2', 'collision+3': exit(hash('collision'));
+  end;
+  if p^ = ord('_') then begin
+    inc(p);
+    while p < last do begin
+      result := (result shl BITS_PER_LEVEL) or ((p^) * 10 + (((p+1)^)));
+      inc(p, 3);
+    end;
+    exit;
+  end;
+
+  //actual hash
   while p < last do begin
     result := result + p^;
     result := result + (result shl 10);
@@ -331,7 +365,7 @@ begin
 end;
 
 
-class procedure THAMTNode.insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; out overriden: boolean);
+class function THAMTNode.insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; allowOverride: boolean): Boolean;
 var node: PHAMTNode;
   //trigger copy-on-write so the node becomes mutable
   procedure UniqueNode;
@@ -354,15 +388,61 @@ var node: PHAMTNode;
   end;
 
 var
-  i, pairIndex: Integer;
-  h, index: THAMTHash;
-  offset, pairOffset: DWord;
+  i: Integer;
+  h, index, h2: THAMTHash;
+  offset: DWord;
+  procedure movePairsDown(pairsIsArray: boolean; pairs: pointer);
+  var node : PHAMTNode;
+      dataOffset: integer;
+      pair: PPair;
+      index2: THAMTHash;
+  begin
+    while i <= LEVEL_HIGH do begin
+      hashShift(h, index);
+      hashShift(h2, index2);
+      if index = index2 then begin
+        //go to next level
+        node := THAMTNode.allocate(1, 0);
+        node.bitmapIsSinglePointer.bits[index] := true;
+        ppnode^.pointers[offset].raw := node;
+        ppnode := @node.pointers[0];
+        offset := 0;
+      end else begin
+        //create node of old pairs and new pair
+        if pairsIsArray then begin
+          node := THAMTNode.allocate(1, 1);
+          node.bitmapIsSinglePointer.bits[index2] := true;
+          node.pointers[0].setToArray(pairs);
+          dataOffset := 0;
+        end else begin
+          node := THAMTNode.allocate(0, 2);
+          node.bitmapIsValue.bits[index2] := true;
+          if index < index2 then dataOffset := 0 else dataOffset := 1;
+          pair := node.getPairFromOffset(1 - dataOffset);
+          TInfo.move(pair^.key, PPair(pairs).key);
+          TInfo.move(pair^.value, PPair(pairs).value);
+          TInfo.addRef(pair^.key);
+          TInfo.addRef(pair^.value);
+        end;
+        pair := node.getPairFromOffset(dataOffset);
+        TInfo.assign(pair.key, key);
+        TInfo.assign(pair.value, value);
+        ppnode^.pointers[offset].raw := node;
+        exit;
+      end;
+    end;
+    assert(false);
+  end;
+
+var
+  pairIndex: Integer;
+  pairOffset: DWord;
   pair: PPair;
   pointerIsArray: boolean;
   rawPointer: Pointer;
   hamtArray, hamtArrayNew: PHAMTArray;
 begin
-  overriden := false;
+  result := true;
   node := ppnode^;
   h := TInfo.hash(key);
   //writeln('insert: ', key, ' ', h);
@@ -374,34 +454,43 @@ begin
       offset := node.getPointerOffset(index);
       rawPointer := node.pointers[offset].unpack(pointerIsArray);
       if pointerIsArray then begin
-        //insert into array
-        {Cases:
-        key already in array           refCount = 1         => override value
-        key already in array           refCount > 1         => clone array, override value in new array
-        key not in array               refCount = 1         => resize array: move values from old to new array (do not change ref counts)
-        key not in array               refCount > 1         => create larger array, copy values from old to new
-
-        }
         hamtArray := PHAMTArray(rawPointer);
-        pairIndex := hamtArray.indexOf(key);
-        overriden := pairIndex >= 0;
-        if (pairIndex < 0) or (hamtArray.refCount > 1) then begin
-          if pairIndex < 0 then begin
-            hamtArrayNew := THAMTArray.allocate(hamtArray.count + 1);
-            pairIndex := hamtArray.count;
-            TInfo.Move(hamtArrayNew.data[pairIndex].key, key);
-            TInfo.addRef(hamtArrayNew.data[pairIndex].key);
-            TInfo.move(hamtArrayNew.data[pairIndex].value, Default(TValue));
-          end else hamtArrayNew := THAMTArray.allocate(hamtArray.count);
-          move(hamtArray.data[0], hamtArrayNew.data[0], hamtArray.count * sizeof(TPair));
-          if hamtArray.refCount > 1 then begin
-            hamtArray.incrementChildrenRefCount();
-            THAMTArray.decrementRefCount(hamtArray);
-          end else Freemem(hamtArray);
-          hamtArray := hamtArrayNew;
-          node.pointers[offset].setToArray(hamtArray);
+        h2 := TInfo.hash(hamtArray.data[0].key) shr (BITS_PER_LEVEL * i + BITS_PER_LEVEL);
+        if h <> h2 then begin
+          //child at index is an array where the keys have a different hash
+          //=> move array to a lower level on which the array hash and new key hash end up at a different index
+          movePairsDown(true, hamtArray);
+          InterLockedIncrement(hamtArray.refCount);
+          decrementRefCount(node);
+        end else begin
+          //array and new key have same hash => insert into array
+          {Cases:
+          key already in array           refCount = 1         => override value
+          key already in array           refCount > 1         => clone array, override value in new array
+          key not in array               refCount = 1         => resize array: move values from old to new array (do not change ref counts)
+          key not in array               refCount > 1         => create larger array, copy values from old to new
+
+          }
+          pairIndex := hamtArray.indexOf(key);
+          if (pairIndex >= 0) then result := false;
+          if (pairIndex < 0) or (hamtArray.refCount > 1) then begin
+            if pairIndex < 0 then begin
+              hamtArrayNew := THAMTArray.allocate(hamtArray.count + 1);
+              pairIndex := hamtArray.count;
+              TInfo.Move(hamtArrayNew.data[pairIndex].key, key);
+              TInfo.addRef(hamtArrayNew.data[pairIndex].key);
+              TInfo.move(hamtArrayNew.data[pairIndex].value, Default(TValue));
+            end else hamtArrayNew := THAMTArray.allocate(hamtArray.count);
+            move(hamtArray.data[0], hamtArrayNew.data[0], hamtArray.count * sizeof(TPair));
+            if hamtArray.refCount > 1 then begin
+              hamtArray.incrementChildrenRefCount();
+              THAMTArray.decrementRefCount(hamtArray);
+            end else Freemem(hamtArray);
+            hamtArray := hamtArrayNew;
+            node.pointers[offset].setToArray(hamtArray);
+          end;
+          TInfo.assign(hamtArray.data[pairIndex].value, value);
         end;
-        TInfo.assign(hamtArray.data[pairIndex].value, value);
         exit;
       end else begin
         //go to next level
@@ -421,7 +510,16 @@ begin
         move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, sizeof(THAMTBitmap) + sizeof(THAMTBitmap) + sizeof(Pointer) * offset); //head, pointer prefix
         move(node.pointers[offset], ppnode^.pointers[offset + 1], sizeof(pointer) * (node.pointerCount - offset) + sizeof(TPair) * pairOffset); //..pointerSuffix..    ..pairPrefix..
         move(node.getPairFromOffset(pairOffset + 1)^ , ppnode^.getPairFromOffset(pairOffset)^, (node.pairCount - pairOffset - 1) * sizeof(TPair) ); //..pairSuffix..
-
+        ppnode^.bitmapIsSinglePointer.bits[index] := true;
+        ppnode^.bitmapIsValue.bits[index] := False;
+        if i < LEVEL_HIGH then begin
+          h2 := TInfo.hash(pair.key) shr (BITS_PER_LEVEL * i + BITS_PER_LEVEL);
+          if h <> h2 then begin
+            movePairsDown(false, pair);
+            decrementRefCount(node);
+            exit;
+          end;
+        end;
         hamtArray := THAMTArray.allocate(2);
         fillchar(hamtArray.data[0], sizeof(TPair) * 2, 0);
         TInfo.move(hamtArray.data[0].key, pair.key);
@@ -430,9 +528,10 @@ begin
         TInfo.assign(hamtArray.data[1].value, value);
         ppnode^.pointers[offset].setToArray(hamtArray);
         decrementRefCount(node);
-        ppnode^.bitmapIsSinglePointer.bits[index] := true;
-        ppnode^.bitmapIsValue.bits[index] := False;
-      end else TInfo.assign(pair.value, value);
+      end else begin
+        result := false;
+        TInfo.assign(pair.value, value);
+      end;
       exit;
     end else begin
       //add key+value pair to node
@@ -487,12 +586,45 @@ end;
 function THAMTNode.get(const key: TKey; const def: TValue): TValue;
 var
   pair: PPair;
-  rawPointer: Pointer;
-  pointerIsArray: boolean;
 begin
   pair := find(key);
   if pair = nil then result := def
   else result := pair.value;
+end;
+
+
+procedure THAMT.init;
+begin
+  froot := THAMTNode.allocate(0,0);
+  fcount := 0;
+end;
+
+function THAMT.insert(const key: TKey; const value: TValue; allowOverride: boolean): boolean;
+begin
+  result := THAMTNode.insert(@froot, key, value, allowOverride);
+  if Result then Inc(fcount);
+end;
+
+function THAMT.contains(const key: TKey): boolean;
+begin
+  result := froot.contains(key);
+end;
+
+function THAMT.get(const key: TKey; const def: TValue): TValue;
+begin
+  result := froot.get(key, def);
+end;
+
+function THAMT.snapshot: THAMT;
+begin
+  result.fcount := fcount;
+  result.froot := froot;
+  InterLockedIncrement(froot.refCount);
+end;
+
+procedure THAMT.release;
+begin
+  THAMTNode.decrementRefCount(froot);
 end;
 
 end.
