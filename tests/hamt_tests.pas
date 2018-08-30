@@ -6,12 +6,15 @@ uses
   {$IFDEF UNIX}{$IFDEF UseCThreads}
   cthreads,
   {$ENDIF}{$ENDIF}
-  Classes, bbhamt, commontestutils, sysutils, bbutils, strutils
+  Classes, bbhamt, commontestutils, sysutils, bbutils, strutils, contnrs
   { you can add units after this };
+
+
 
 type THAMT_Test = object(THAMTStringString) //object(specialize THAMT<string, string, THAMTTypeInfo>)
   procedure testInsert(const k, v: string; override: boolean = false);
   procedure testGet(const k, v: string);
+  procedure testEnumeration(expectedCount: integer);
 end;
 
 const MISSING = 'MISSING';
@@ -30,6 +33,24 @@ begin
   test(get(k, MISSING), v, 'get ' + k);
 end;
 
+procedure THAMT_Test.testEnumeration(expectedCount: integer);
+var
+  pair: THAMTStringString.PPair;
+  visitedKeys: TFPStringHashTable;
+  acount: integer;
+begin
+  acount := 0;
+  visitedKeys := TFPStringHashTable.Create;
+  for pair in self do begin
+    test(visitedKeys.Find(pair^.key) = nil, 'duplicated key');
+    inc(acount);
+    test(get(pair^.key, MISSING), pair^.value);
+    visitedKeys.Add(pair^.key, pair^.value);
+  end;
+  test(acount, expectedCount);
+  visitedKeys.Free;
+end;
+
 var
   hamt, hamt2: THAMT_Test;
 begin
@@ -45,6 +66,7 @@ begin
 
   hamt.testGet('foo', 'bar');
 
+  hamt.testEnumeration(2);
   hamt.release;
 
 
@@ -59,6 +81,7 @@ begin
   hamt.testGet('collision', 'B');
   hamt.testGet('collision+1', 'C');
   hamt.testGet('collision+2', 'D');
+  hamt.testEnumeration(4);
   hamt.release;
 
 
@@ -69,6 +92,7 @@ begin
 
   hamt.testGet('_00_01_02', 'x2');
   hamt.testGet('_00_02_03', 'x3');
+  hamt.testEnumeration(2);
   hamt.release;
 
   hamt.init;
@@ -78,6 +102,7 @@ begin
   hamt.testGet('_00_01_02', 'x1');
   hamt.testGet('_00_01-02', 'x1b');
   hamt.testGet('_00_01-03', 'y');
+  hamt.testEnumeration(3);
   hamt.release;
 
   //test prefix collisions
@@ -88,6 +113,7 @@ begin
 
   hamt.testGet('_02_01_00', 'x2');
   hamt.testGet('_03_02_00', 'x3');
+  hamt.testEnumeration(2);
   hamt.release;
 
   hamt.init;
@@ -98,6 +124,7 @@ begin
   hamt.testGet('_02_01_00', 'x1');
   hamt.testGet('_02x01_00', 'x2');
   hamt.testGet('_03_02_00', 'x3');
+  hamt.testEnumeration(3);
   hamt.release;
 
 
@@ -113,6 +140,8 @@ begin
 
   hamt2.testGet('hello', 'world');
   hamt2.testGet('foo', 'bar');
+  hamt.testEnumeration(2);
+  hamt2.testEnumeration(2);
   hamt.release;
   hamt2.release;
 
@@ -130,6 +159,8 @@ begin
   hamt2.testGet('hello', 'world');
   hamt2.testGet('foo', 'bar');
   hamt2.testGet('new', MISSING);
+  hamt.testEnumeration(3);
+  hamt2.testEnumeration(2);
   hamt.release;
   hamt2.release;
 
@@ -157,6 +188,8 @@ begin
   hamt2.testGet('_03_02_00', 'x3');
   hamt2.testGet('_03_03_00', 'x4');
 
+  hamt.testEnumeration(3);
+  hamt2.testEnumeration(3);
   hamt.release;
   hamt2.release;
 
@@ -174,6 +207,8 @@ begin
   hamt2.testGet('_02_01_00', 'x1');
   hamt2.testGet('_02-01_00', 'x2');
   hamt2.testGet('_03_02_00', MISSING);
+  hamt.testEnumeration(3);
+  hamt2.testEnumeration(2);
   hamt.release;
   hamt2.release;
 
@@ -191,6 +226,8 @@ begin
   hamt2.testGet('_02_01_00', 'x1');
   hamt2.testGet('_02-01_00', 'x2');
   hamt2.testGet('_02x01_00', MISSING);
+  hamt.testEnumeration(3);
+  hamt2.testEnumeration(2);
   hamt.release;
   hamt2.release;
 
@@ -205,6 +242,8 @@ begin
   hamt.testGet('_02-01_00', 'x3');
   hamt2.testGet('_02_01_00', 'x1');
   hamt2.testGet('_02-01_00', 'x2');
+  hamt.testEnumeration(2);
+  hamt2.testEnumeration(2);
   hamt.release;
   hamt2.release;
 

@@ -49,8 +49,11 @@ type
     function unpack(out isArray: boolean): pointer; inline;
     procedure setToArray(p: pointer); inline;
   end;
+const
+  BITS_PER_LEVEL = 5;
+  LEVEL_HIGH = ( sizeof(THAMTHash) * 8 ) div BITS_PER_LEVEL;
+type
   generic THAMTNode<TKey, TValue, TInfo> = packed object
-  protected
     type
     PKey = ^TKey;
     PValue = ^TValue;
@@ -73,6 +76,17 @@ type
     end;
     PHAMTNode = ^THAMTNode;
     PPHAMTNode = ^PHAMTNode;
+    THAMTEnumerator = object
+    protected
+      level: integer;
+      stack: array[0..LEVEL_HIGH] of PHAMTNode;
+      offsets: array[0..LEVEL_HIGH] of integer;
+      fcurrent, pairLast: PPair;
+      function pushNode(node: PHAMTNode): boolean;
+    public
+      property current: PPair read fcurrent;
+      function MoveNext: boolean;
+    end;
 
   protected
     refCount: Integer;
@@ -111,6 +125,7 @@ type
   generic THAMT<TKey, TValue, TInfo> = packed object
   type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
        PHAMTNode = ^THAMTNode;
+       PPair = THAMTNode.PPair;
   protected
     fcount: SizeInt;
     froot: PHAMTNode;
@@ -128,6 +143,7 @@ type
     function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean;
     function contains(const key:TKey): boolean; inline;
     function get(const key: TKey; const def: TValue): TValue; inline;
+    function getEnumerator: THAMTNode.THAMTEnumerator;
     function snapshot: THAMT;
     procedure release;
   end;
@@ -138,10 +154,61 @@ type
   function alignedGetMem(s: PtrUInt): pointer; inline;
 
 
-  const
-    BITS_PER_LEVEL = 5;
-    LEVEL_HIGH = ( sizeof(THAMTHash) * 8 ) div BITS_PER_LEVEL;
 implementation
+
+function THAMTNode.THAMTEnumerator.pushNode(node: PHAMTNode): boolean;
+begin
+  inc(level);
+  stack[level] := node;
+  offsets[level] := -1;
+  result := node.pairCount > 0;
+  if result then begin
+    fcurrent := node.getPairFromOffset(0);
+    pairLast := current + node.pairCount - 1;
+  end;
+end;
+
+function THAMTNode.THAMTEnumerator.MoveNext: boolean;
+var
+  node: PHAMTNode;
+  p: Pointer;
+  isArray: boolean;
+begin
+  result := current < pairLast;
+  if result then begin
+    inc(fcurrent);
+    exit;
+  end;
+
+  while level >= 0 do begin
+    node := stack[level];
+    inc(offsets[level]);
+    if offsets[level] < node.pointerCount then begin
+      p := node.pointers[offsets[level]].unpack(isArray);
+      if isArray then begin
+        fcurrent := @PHAMTArray(p).data[0];
+        pairLast := @PHAMTArray(p).data[PHAMTArray(p).count - 1];
+        assert(fcurrent <= pairLast);
+        exit(true);
+      end;
+      result := pushNode(PHAMTNode(p));
+      if result then exit;
+    end else dec(level);
+  end;
+
+  result := false;
+end;
+
+  {
+
+  result := currentPairIndex < node.pairCount;
+  if result then begin
+    current := node.getPairFromOffset(currentPairIndex);
+    inc(currentPairIndex);
+  end;
+  if
+end;
+                  }
 
 
 
@@ -655,6 +722,16 @@ end;
 function THAMT.get(const key: TKey; const def: TValue): TValue;
 begin
   result := froot.get(key, def);
+end;
+
+function THAMT.getEnumerator: THAMTNode.THAMTEnumerator;
+begin
+  result.level:=-1;
+  if result.pushNode(froot) then dec(result.fcurrent)
+  else begin
+    result.fcurrent := nil;
+    result.pairLast := nil;
+  end;
 end;
 
 function THAMT.snapshot: THAMT;
