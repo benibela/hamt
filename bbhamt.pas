@@ -28,23 +28,12 @@ unit bbhamt;
 
 interface
 
-type {generic THAMT<TKey, TValue, Thash>=class
-
-end;  }
-    ppointer = ^pointer;
-  TKey = string;
-  TValue = string;
-  PKey = ^TKey;
-  PValue = ^TValue;
-  TPair = packed record
-    key: TKey;
-    value: TValue;
-  end;
-  PPair = ^TPair;
-  TPairArray = array of TPair;
+type
+  ppointer = ^pointer;
 
   THAMTHash = Cardinal;
   THAMTBitmap = record
+    function countBeforeIndex(index: THAMTHash): DWord; inline;
     case boolean of
       false: (bits: bitpacked array[0..31] of boolean);
       true: (all: Cardinal);
@@ -55,16 +44,21 @@ end;  }
      - empty                                                false                       false                 -
      - one pair (key + value)                               false                       true                  -
   }
-  PHAMTNode = ^THAMTNode;
-  PPHAMTNode = ^PHAMTNode;
   THAMTTaggedPointer = packed record
     raw: pointer;
     function unpack(out isArray: boolean): pointer; inline;
     procedure setToArray(p: pointer); inline;
   end;
-  THAMTNode = packed object
+  generic THAMTNode<TKey, TValue, TInfo> = packed object
   protected
     type
+    PKey = ^TKey;
+    PValue = ^TValue;
+    TPair = packed record
+      key: TKey;
+      value: TValue;
+    end;
+    PPair = ^TPair;
     PHAMTArray = ^THAMTArray;
     THAMTArray = packed object
       refCount: Integer;
@@ -77,6 +71,8 @@ end;  }
       function indexOf(const key: TKey): integer;
       function find(const key: TKey): PPair;
     end;
+    PHAMTNode = ^THAMTNode;
+    PPHAMTNode = ^PHAMTNode;
 
   protected
     refCount: Integer;
@@ -89,6 +85,7 @@ end;  }
     function getPairOffset(index: THAMTHash): DWord; inline;
     function getPairFromOffset(offset: DWord): PPair; inline;
     function getPairAddr(index: THAMTHash): PPair; inline;
+    class procedure hashShift(var hash: THAMTHash; out index: THAMTHash); static; inline;
     class function size(apointerCount, apairCount: integer): SizeInt; static; inline;
     procedure incrementChildrenRefCount;
   public
@@ -101,8 +98,8 @@ end;  }
     function get(const key: TKey; const def: TValue): TValue;
   end;
   THAMTTypeInfo = object
-    class function hash(const s: TKey): THAMTHash;
-    class function equal(const s, t: TKey): boolean;
+    class function hash(const s: string): THAMTHash;
+    class function equal(const s, t: string): boolean;
 
     class procedure addRef(var k: string); inline;
     class procedure release(var k: string); inline;
@@ -111,7 +108,9 @@ end;  }
   end;
   TInfo = type THAMTTypeInfo;
 
-  THAMT = object
+  generic THAMT<TKey, TValue, TInfo> = packed object
+  type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
+       PHAMTNode = ^THAMTNode;
   protected
     fcount: SizeInt;
     froot: PHAMTNode;
@@ -133,19 +132,20 @@ end;  }
     procedure release;
   end;
 
-{  THAMTStringString = class
-
-  end;}
+  type THAMTStringString = specialize THAMT<string, string, THAMTTypeInfo>;
 
 
+  function alignedGetMem(s: PtrUInt): pointer; inline;
+
+
+  const
+    BITS_PER_LEVEL = 5;
+    LEVEL_HIGH = ( sizeof(THAMTHash) * 8 ) div BITS_PER_LEVEL;
 implementation
 
-const
-  BITS_PER_LEVEL = 5;
-  LEVEL_HIGH = ( sizeof(THAMTHash) * 8 ) div BITS_PER_LEVEL;
 
 
-class function TInfo.hash(const s: TKey): THAMTHash;
+class function THAMTTypeInfo.hash(const s: string): THAMTHash;
 var
   p, last: PByte;
 begin
@@ -181,7 +181,7 @@ begin
   result := result + (result shl 15);
 end;
 
-class function TInfo.equal(const s,t:TKey): boolean;
+class function THAMTTypeInfo.equal(const s,t:string): boolean;
 begin
   result := s = t;
 end;
@@ -190,38 +190,38 @@ Procedure fpc_AnsiStr_Incr_Ref (S : Pointer); [external name 'FPC_ANSISTR_INCR_R
 Procedure fpc_ansistr_decr_ref (Var S : Pointer); [external name 'FPC_ANSISTR_DECR_REF'];
 
 
-class procedure TInfo.addRef(var k: string);
+class procedure THAMTTypeInfo.addRef(var k: string);
 begin
   fpc_ansistr_incr_ref(pointer(k));
 end;
 
-class procedure TInfo.release(var k: string);
+class procedure THAMTTypeInfo.release(var k: string);
 begin
   fpc_ansistr_decr_ref(pointer(k));
 end;
 
-class procedure TInfo.assignRef(var target: string; const source: string);
+class procedure THAMTTypeInfo.assignRef(var target: string; const source: string);
 begin
   target := source;
 end;
 
-class procedure TInfo.assignPtr(var target: string; const source: string);
+class procedure THAMTTypeInfo.assignPtr(var target: string; const source: string);
 begin
   pointer(target) := pointer(source);
 end;
 
-procedure hashShift(var hash: THAMTHash; out index: THAMTHash); inline;
+class procedure THAMTNode.hashShift(var hash: THAMTHash; out index: THAMTHash); inline;
 begin
   index := hash and %11111;
   hash := hash shr BITS_PER_LEVEL;
 end;
 
-function bitmapCountBeforeIndex(const bitmapAll: Cardinal; index: THAMTHash): DWord; inline;
+function THAMTBitmap.countBeforeIndex(index: THAMTHash): DWord; inline;
 var
   mask: THAMTHash;
 begin
   mask := (1 shl index) - 1;
-  result := PopCnt(bitmapAll and mask);
+  result := PopCnt(all and mask);
 end;
 
 function alignedGetMem(s: PtrUInt): pointer; inline;
@@ -306,12 +306,12 @@ end;
 
 function THAMTNode.getPointerOffset(index: THAMTHash): DWord;
 begin
-  result := bitmapCountBeforeIndex(bitmapIsSinglePointer.all, index);
+  result := bitmapIsSinglePointer.countBeforeIndex(index);
 end;
 
 function THAMTNode.getPairOffset(index: THAMTHash): DWord;
 begin
-  result := bitmapCountBeforeIndex(bitmapIsValue.all, index);
+  result := bitmapIsValue.countBeforeIndex(index);
 end;
 
 function THAMTNode.getPairFromOffset(offset: DWord): PPair;
@@ -412,17 +412,21 @@ var node: PHAMTNode;
   end;
 
 var pairIndex: Integer;
-  function cloneArray(hamtArray: PHAMTArray; appendOnePair: Boolean): PHAMTArray;
+  function cloneArray(hamtArrayx: pointer; appendOnePair: Boolean): pointer;
+  var HAMTArray: PHAMTArray;
+    pair: PPair;
   begin
+    HAMTArray := PHAMTArray(hamtArrayx);
     if appendOnePair then begin
       result := THAMTArray.allocate(hamtArray.count + 1);
       pairIndex := hamtArray.count;
-      TInfo.assignPtr(result.data[pairIndex].key, key);
-      TInfo.addRef(result.data[pairIndex].key);
-      TInfo.assignPtr(result.data[pairIndex].value, Default(TValue));
+      pair := @PHAMTArray(result).data[pairIndex];
+      TInfo.assignPtr(pair.key, key);
+      TInfo.addRef(pair.key);
+      TInfo.assignPtr(pair.value, Default(TValue));
     end else
       result := THAMTArray.allocate(hamtArray.count);
-    move(hamtArray.data[0], result.data[0], hamtArray.count * sizeof(TPair));
+    move(hamtArray.data[0], PHAMTArray(result).data[0], hamtArray.count * sizeof(TPair));
     if hamtArray.refCount > 1 then begin
       hamtArray.incrementChildrenRefCount();
       THAMTArray.decrementRefCount(hamtArray);

@@ -9,7 +9,7 @@ uses
   Classes, bbhamt, commontestutils, sysutils, bbutils, strutils
   { you can add units after this };
 
-type THAMT_Test = object(THAMT)
+type THAMT_Test = object(THAMTStringString) //object(specialize THAMT<string, string, THAMTTypeInfo>)
   procedure testInsert(const k, v: string; override: boolean = false);
   procedure testGet(const k, v: string);
 end;
