@@ -32,7 +32,7 @@
         <IsPartOfProject Value="True"/>
       </Unit0>
       <Unit1>
-        <Filename Value="..\..\..\..\..\..\theo\hg\components\pascal\data\bbhamt.pas"/>
+        <Filename Value="..\bbhamt.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit1>
     </Units>
@@ -42,8 +42,8 @@
     <PathDelim Value="\"/>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="\tmp\U:\components\pascal\data\;\import\synapse\;\tmp\U:\components\pascal\internet\;\tmp\U:\components\lazarus\dialogs\;\tmp\U:\components\pascal\system\;\home\benito\hg\components\pascal\data\;\home\benito\hg\programs\contests\euler\;\home\benito\hg\components\pascal\internet\;\home\benito\hg\components\lazarus\dialogs\;\home\benito\hg\components\pascal\system\;\home\benito\hg\components\pascal\import\regexpr\source\;\home\theo\hg\components\pascal\data\"/>
-      <SrcPath Value="\home\benito\hg\components\pascal\import\synapse\;\import\synapse\"/>
+      <OtherUnitFiles Value="\home\benito\hg\components\pascal\data\;\home\benito\hg\programs\contests\euler\;\home\benito\hg\components\pascal\internet\;\home\benito\hg\components\lazarus\dialogs\;\home\benito\hg\components\pascal\system\;.."/>
+      <SrcPath Value="\home\benito\hg\components\pascal\import\synapse\"/>
     </SearchPaths>
     <Linking>
       <Debugging>

@@ -137,7 +137,7 @@ begin
   if p^ = ord('_') then begin
     inc(p);
     while p < last do begin
-      result := (result shl BITS_PER_LEVEL) or ((p^) * 10 + (((p+1)^)));
+      result := (result shl BITS_PER_LEVEL) or ((p^ - ord('0')) * 10 + (((p+1)^ - ord('0') )));
       inc(p, 3);
     end;
     exit;
@@ -381,7 +381,7 @@ var node: PHAMTNode;
       s := size(node.pointerCount, node.pairCount);
       ppnode^ := alignedGetMem(s);
       move(node^, ppnode^^, s);
-      InterLockedDecrement(node^.refCount);
+      decrementRefCount(node);
       ppnode^^.refCount := 1;
       node := ppnode^;
     end;
@@ -403,7 +403,8 @@ var
       if index = index2 then begin
         //go to next level
         node := THAMTNode.allocate(1, 0);
-        node.bitmapIsSinglePointer.bits[index] := true;
+        node.bitmapIsSinglePointer.all := 1 shl index;
+        node.bitmapIsValue.all := 0;
         ppnode^.pointers[offset].raw := node;
         ppnode := @node.pointers[0];
         offset := 0;
@@ -411,12 +412,14 @@ var
         //create node of old pairs and new pair
         if pairsIsArray then begin
           node := THAMTNode.allocate(1, 1);
-          node.bitmapIsSinglePointer.bits[index2] := true;
+          node.bitmapIsSinglePointer.all := 1 shl index2;
+          node.bitmapIsValue.all := 1 shl index;
           node.pointers[0].setToArray(pairs);
           dataOffset := 0;
         end else begin
           node := THAMTNode.allocate(0, 2);
-          node.bitmapIsValue.bits[index2] := true;
+          node.bitmapIsSinglePointer.all := 0;
+          node.bitmapIsValue.all := (1 shl index) or (1 shl index2);
           if index < index2 then dataOffset := 0 else dataOffset := 1;
           pair := node.getPairFromOffset(1 - dataOffset);
           TInfo.move(pair^.key, PPair(pairs).key);
@@ -460,8 +463,6 @@ begin
           //child at index is an array where the keys have a different hash
           //=> move array to a lower level on which the array hash and new key hash end up at a different index
           movePairsDown(true, hamtArray);
-          InterLockedIncrement(hamtArray.refCount);
-          decrementRefCount(node);
         end else begin
           //array and new key have same hash => insert into array
           {Cases:
@@ -472,7 +473,10 @@ begin
 
           }
           pairIndex := hamtArray.indexOf(key);
-          if (pairIndex >= 0) then result := false;
+          if (pairIndex >= 0) then begin
+            result := false;
+            if not allowOverride then exit;
+          end;
           if (pairIndex < 0) or (hamtArray.refCount > 1) then begin
             if pairIndex < 0 then begin
               hamtArrayNew := THAMTArray.allocate(hamtArray.count + 1);
@@ -480,12 +484,14 @@ begin
               TInfo.Move(hamtArrayNew.data[pairIndex].key, key);
               TInfo.addRef(hamtArrayNew.data[pairIndex].key);
               TInfo.move(hamtArrayNew.data[pairIndex].value, Default(TValue));
-            end else hamtArrayNew := THAMTArray.allocate(hamtArray.count);
+            end else
+              hamtArrayNew := THAMTArray.allocate(hamtArray.count);
             move(hamtArray.data[0], hamtArrayNew.data[0], hamtArray.count * sizeof(TPair));
             if hamtArray.refCount > 1 then begin
               hamtArray.incrementChildrenRefCount();
               THAMTArray.decrementRefCount(hamtArray);
-            end else Freemem(hamtArray);
+            end else
+              Freemem(hamtArray);
             hamtArray := hamtArrayNew;
             node.pointers[offset].setToArray(hamtArray);
           end;
@@ -530,12 +536,13 @@ begin
         decrementRefCount(node);
       end else begin
         result := false;
-        TInfo.assign(pair.value, value);
+        if not allowOverride then exit;
+        UniqueNode;
+        TInfo.assign(node.getPairFromOffset(pairOffset).value, value);
       end;
       exit;
     end else begin
-      //add key+value pair to node
-      if node.refCount > 1 then node.incrementChildrenRefCount;
+      //copy node and add key+value pair
       offset := node.getPairOffset(index);
       ppnode^ := allocate(node.pointerCount, node.pairCount + 1);
       move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, sizeof(THAMTBitmap) + sizeof(THAMTBitmap) + sizeof(Pointer) * node.pointerCount + sizeof(TPair) * offset);
@@ -543,7 +550,10 @@ begin
       pair := ppnode^.getPairFromOffset(offset);
       TInfo.assign(pair.key, key);
       TInfo.assign(pair.value, value);
-      decrementRefCount(node);
+      if node.refCount > 1 then begin
+        node.incrementChildrenRefCount;
+        decrementRefCount(node)
+      end else Freemem(node);
       ppnode^.bitmapIsValue.bits[index] := true;
       exit;
     end;
@@ -563,7 +573,7 @@ begin
   for i := 0 to LEVEL_HIGH do begin
     hashShift(h, index);
     if node.bitmapIsSinglePointer.bits[index] then begin
-      rawPointer := node.pointers[getPointerOffset(index)].unpack(pointerIsArray);
+      rawPointer := node.pointers[node.getPointerOffset(index)].unpack(pointerIsArray);
       if pointerIsArray then
         exit(PHAMTArray(rawPointer).find(key))
        else
