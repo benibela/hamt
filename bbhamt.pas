@@ -1,3 +1,27 @@
+{
+A collection of often needed functions missing in FPC
+
+Copyright (C) 2018         Benito van der Zander (BeniBela)
+                           benito@benibela.de
+                           www.benibela.de
+
+This file is distributed under under the same license as Lazarus and the LCL itself:
+
+This file is distributed under the Library GNU General Public License
+with the following modification:
+
+As a special exception, the copyright holders of this library give you
+permission to link this library with independent modules to produce an
+executable, regardless of the license terms of these independent modules,
+and to copy and distribute the resulting executable under terms of your choice,
+provided that you also meet, for each linked independent module, the terms
+and conditions of the license of that module. An independent module is a
+module which is not derived from or based on this library. If you modify this
+library, you may extend this exception to your version of the library, but
+you are not obligated to do so. If you do not wish to do so, delete this
+exception statement from your version.
+
+}
 unit bbhamt;
 
 {$mode objfpc}{$H+}{$ModeSwitch autoderef}{$ModeSwitch advancedrecords}
@@ -76,22 +100,14 @@ end;  }
     function contains(const key:TKey):boolean;
     function get(const key: TKey; const def: TValue): TValue;
   end;
-{
-//insert override allowed = true
-  result = true                  inserted, no override
-  result = false                 inserted, override
-//insert override forbidden = false
-  result = true                  inserted, (no override)
-  result = false                 not inserted
-}
   THAMTTypeInfo = object
     class function hash(const s: TKey): THAMTHash;
     class function equal(const s, t: TKey): boolean;
 
     class procedure addRef(var k: string); inline;
     class procedure release(var k: string); inline;
-    class procedure assign(var target: string; const source: string); inline; //target := source
-    class procedure move(var target: string; const source: string); inline;   //assignment without reference counting
+    class procedure assignRef(var target: string; const source: string); inline; //target := source with reference counting
+    class procedure assignPtr(var target: string; const source: string); inline;   //assignment without reference counting
   end;
   TInfo = type THAMTTypeInfo;
 
@@ -102,6 +118,14 @@ end;  }
   public
     property count: SizeInt read fcount;
     procedure init;
+    {
+    //insert override allowed = true
+      result = true                  inserted, no override
+      result = false                 inserted, override
+    //insert override forbidden = false
+      result = true                  inserted, (no override)
+      result = false                 not inserted
+    }
     function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean;
     function contains(const key:TKey): boolean; inline;
     function get(const key: TKey; const def: TValue): TValue; inline;
@@ -176,12 +200,12 @@ begin
   fpc_ansistr_decr_ref(pointer(k));
 end;
 
-class procedure TInfo.assign(var target: string; const source: string);
+class procedure TInfo.assignRef(var target: string; const source: string);
 begin
   target := source;
 end;
 
-class procedure TInfo.move(var target: string; const source: string);
+class procedure TInfo.assignPtr(var target: string; const source: string);
 begin
   pointer(target) := pointer(source);
 end;
@@ -387,6 +411,25 @@ var node: PHAMTNode;
     end;
   end;
 
+var pairIndex: Integer;
+  function cloneArray(hamtArray: PHAMTArray; appendOnePair: Boolean): PHAMTArray;
+  begin
+    if appendOnePair then begin
+      result := THAMTArray.allocate(hamtArray.count + 1);
+      pairIndex := hamtArray.count;
+      TInfo.assignPtr(result.data[pairIndex].key, key);
+      TInfo.addRef(result.data[pairIndex].key);
+      TInfo.assignPtr(result.data[pairIndex].value, Default(TValue));
+    end else
+      result := THAMTArray.allocate(hamtArray.count);
+    move(hamtArray.data[0], result.data[0], hamtArray.count * sizeof(TPair));
+    if hamtArray.refCount > 1 then begin
+      hamtArray.incrementChildrenRefCount();
+      THAMTArray.decrementRefCount(hamtArray);
+    end else
+      Freemem(hamtArray);
+  end;
+
 var
   i: Integer;
   h, index, h2: THAMTHash;
@@ -422,14 +465,14 @@ var
           node.bitmapIsValue.all := (1 shl index) or (1 shl index2);
           if index < index2 then dataOffset := 0 else dataOffset := 1;
           pair := node.getPairFromOffset(1 - dataOffset);
-          TInfo.move(pair^.key, PPair(pairs).key);
-          TInfo.move(pair^.value, PPair(pairs).value);
+          TInfo.assignPtr(pair^.key, PPair(pairs).key);
+          TInfo.assignPtr(pair^.value, PPair(pairs).value);
           TInfo.addRef(pair^.key);
           TInfo.addRef(pair^.value);
         end;
         pair := node.getPairFromOffset(dataOffset);
-        TInfo.assign(pair.key, key);
-        TInfo.assign(pair.value, value);
+        TInfo.assignRef(pair.key, key);
+        TInfo.assignRef(pair.value, value);
         ppnode^.pointers[offset].raw := node;
         exit;
       end;
@@ -438,12 +481,11 @@ var
   end;
 
 var
-  pairIndex: Integer;
   pairOffset: DWord;
   pair: PPair;
   pointerIsArray: boolean;
   rawPointer: Pointer;
-  hamtArray, hamtArrayNew: PHAMTArray;
+  hamtArray: PHAMTArray;
 begin
   result := true;
   node := ppnode^;
@@ -478,24 +520,10 @@ begin
             if not allowOverride then exit;
           end;
           if (pairIndex < 0) or (hamtArray.refCount > 1) then begin
-            if pairIndex < 0 then begin
-              hamtArrayNew := THAMTArray.allocate(hamtArray.count + 1);
-              pairIndex := hamtArray.count;
-              TInfo.Move(hamtArrayNew.data[pairIndex].key, key);
-              TInfo.addRef(hamtArrayNew.data[pairIndex].key);
-              TInfo.move(hamtArrayNew.data[pairIndex].value, Default(TValue));
-            end else
-              hamtArrayNew := THAMTArray.allocate(hamtArray.count);
-            move(hamtArray.data[0], hamtArrayNew.data[0], hamtArray.count * sizeof(TPair));
-            if hamtArray.refCount > 1 then begin
-              hamtArray.incrementChildrenRefCount();
-              THAMTArray.decrementRefCount(hamtArray);
-            end else
-              Freemem(hamtArray);
-            hamtArray := hamtArrayNew;
+            hamtArray := cloneArray(hamtArray, pairIndex < 0);
             node.pointers[offset].setToArray(hamtArray);
           end;
-          TInfo.assign(hamtArray.data[pairIndex].value, value);
+          TInfo.assignRef(hamtArray.data[pairIndex].value, value);
         end;
         exit;
       end else begin
@@ -528,17 +556,17 @@ begin
         end;
         hamtArray := THAMTArray.allocate(2);
         fillchar(hamtArray.data[0], sizeof(TPair) * 2, 0);
-        TInfo.move(hamtArray.data[0].key, pair.key);
-        TInfo.move(hamtArray.data[0].value, pair.value);
-        TInfo.assign(hamtArray.data[1].key, key);
-        TInfo.assign(hamtArray.data[1].value, value);
+        TInfo.assignPtr(hamtArray.data[0].key, pair.key);
+        TInfo.assignPtr(hamtArray.data[0].value, pair.value);
+        TInfo.assignRef(hamtArray.data[1].key, key);
+        TInfo.assignRef(hamtArray.data[1].value, value);
         ppnode^.pointers[offset].setToArray(hamtArray);
         decrementRefCount(node);
       end else begin
         result := false;
         if not allowOverride then exit;
         UniqueNode;
-        TInfo.assign(node.getPairFromOffset(pairOffset).value, value);
+        TInfo.assignRef(node.getPairFromOffset(pairOffset).value, value);
       end;
       exit;
     end else begin
@@ -548,8 +576,8 @@ begin
       move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, sizeof(THAMTBitmap) + sizeof(THAMTBitmap) + sizeof(Pointer) * node.pointerCount + sizeof(TPair) * offset);
       move( node.getPairFromOffset(offset)^ , ppnode^.getPairFromOffset(offset+1)^ , (node.pairCount - offset) * sizeof(TPair) );
       pair := ppnode^.getPairFromOffset(offset);
-      TInfo.assign(pair.key, key);
-      TInfo.assign(pair.value, value);
+      TInfo.assignRef(pair.key, key);
+      TInfo.assignRef(pair.value, value);
       if node.refCount > 1 then begin
         node.incrementChildrenRefCount;
         decrementRefCount(node)
