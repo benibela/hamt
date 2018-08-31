@@ -144,7 +144,7 @@ type
     function contains(const key:TKey): boolean; inline;
     function get(const key: TKey; const def: TValue): TValue; inline;
     function getEnumerator: THAMTNode.THAMTEnumerator;
-    function snapshot: THAMT;
+    function clone: THAMT;
     procedure release;
   end;
 
@@ -211,7 +211,9 @@ end;
                   }
 
 
-
+{$PUSH}
+{$RangeChecks OFF}
+{$OverflowChecks OFF}
 class function THAMTTypeInfo.hash(const s: string): THAMTHash;
 var
   p, last: PByte;
@@ -247,6 +249,7 @@ begin
   result := result xor (result shr 11);
   result := result + (result shl 15);
 end;
+{$POP}
 
 class function THAMTTypeInfo.equal(const s,t:string): boolean;
 begin
@@ -734,7 +737,7 @@ begin
   end;
 end;
 
-function THAMT.snapshot: THAMT;
+function THAMT.clone: THAMT;
 begin
   result.fcount := fcount;
   result.froot := froot;
