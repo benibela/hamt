@@ -40,10 +40,11 @@ begin
   writeln(hamt1.get('hello', 'default')); // world
   writeln(hamt1.get('foo', 'default'));   // default
 
+  hamt1.release;
+
   writeln(hamt2.get('hello', 'default')); // world
   writeln(hamt2.get('foo', 'default'));   // bar
 
-  hamt1.release;
   hamt2.release;
 end.
 ```
