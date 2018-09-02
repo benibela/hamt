@@ -14,6 +14,7 @@ uses
 type THAMT_Test = object(THAMTStringString) //object(specialize THAMT<string, string, THAMTTypeInfo>)
   procedure testInsert(const k, v: string; override: boolean = false);
   procedure testGet(const k, v: string);
+  procedure testRemove(const k: string; notthere: boolean = false);
   procedure testEnumeration(expectedCount: integer);
 end;
 
@@ -31,6 +32,12 @@ end;
 procedure THAMT_Test.testGet(const k, v: string);
 begin
   test(get(k, MISSING), v, 'get ' + k);
+end;
+
+procedure THAMT_Test.testRemove(const k: string; notthere: boolean);
+begin
+  test(remove(k) <> notthere);
+  test(get(k, MISSING), MISSING);
 end;
 
 procedure THAMT_Test.testEnumeration(expectedCount: integer);
@@ -67,6 +74,7 @@ begin
   hamt.testGet('foo', 'bar');
 
   hamt.testEnumeration(2);
+  hamt.remove('hello');
   hamt.release;
 
 
@@ -82,6 +90,9 @@ begin
   hamt.testGet('collision+1', 'C');
   hamt.testGet('collision+2', 'D');
   hamt.testEnumeration(4);
+  hamt.testRemove('test');
+  hamt.testRemove('test', true);
+  hamt.testRemove('test!', true);
   hamt.release;
 
 
@@ -93,6 +104,7 @@ begin
   hamt.testGet('_00_01_02', 'x2');
   hamt.testGet('_00_02_03', 'x3');
   hamt.testEnumeration(2);
+  hamt.testRemove('_01_02-03', true);
   hamt.release;
 
   hamt.init;
@@ -103,6 +115,8 @@ begin
   hamt.testGet('_00_01-02', 'x1b');
   hamt.testGet('_00_01-03', 'y');
   hamt.testEnumeration(3);
+  hamt.testRemove('_01_01-02', true);
+  hamt.testRemove('_01_02-02', true);
   hamt.release;
 
   //test prefix collisions
@@ -132,7 +146,7 @@ begin
   hamt.init;
   hamt.testInsert('hello', 'world');
   hamt.testInsert('foo', 'bar');
-  hamt2 := THAMT_Test(hamt.snapshot);
+  hamt2 := THAMT_Test(hamt.clone);
   hamt.testInsert('hello', 'override', true);
 
   hamt.testGet('hello', 'override');
@@ -149,7 +163,7 @@ begin
   hamt.init;
   hamt.testInsert('hello', 'world');
   hamt.testInsert('foo', 'bar');
-  hamt2 := THAMT_Test(hamt.snapshot);
+  hamt2 := THAMT_Test(hamt.clone);
   hamt.testInsert('new', 'N');
 
   hamt.testGet('hello', 'world');
@@ -161,6 +175,10 @@ begin
   hamt2.testGet('new', MISSING);
   hamt.testEnumeration(3);
   hamt2.testEnumeration(2);
+  hamt.testRemove('new');
+  hamt2.testRemove('hello');
+  hamt.testEnumeration(2);
+  hamt2.testEnumeration(1);
   hamt.release;
   hamt2.release;
 
@@ -168,7 +186,7 @@ begin
   hamt.init;
   hamt.testInsert('_02_01_00', 'x1');
   hamt.testInsert('_02_01_00', 'x2', true);
-  hamt2 := THAMT_Test(hamt.snapshot);
+  hamt2 := THAMT_Test(hamt.clone);
   hamt.testInsert('_03_02_00', 'x3');
 
   hamt.testGet('_02_01_00', 'x2');
@@ -178,7 +196,7 @@ begin
 
   hamt.testInsert('_03_03_00', 'x4');
   hamt2.release;
-  hamt2 := THAMT_Test(hamt.snapshot);
+  hamt2 := THAMT_Test(hamt.clone);
   hamt.testInsert('_03_03_00', 'x5', true);
 
   hamt.testGet('_02_01_00', 'x2');
@@ -198,7 +216,7 @@ begin
   hamt.init;
   hamt.testInsert('_02_01_00', 'x1');
   hamt.testInsert('_02-01_00', 'x2');
-  hamt2 := THAMT_Test(hamt.snapshot);
+  hamt2 := THAMT_Test(hamt.clone);
   hamt.testInsert('_03_02_00', 'x3');
 
   hamt.testGet('_02_01_00', 'x1');
@@ -209,6 +227,12 @@ begin
   hamt2.testGet('_03_02_00', MISSING);
   hamt.testEnumeration(3);
   hamt2.testEnumeration(2);
+  hamt.testRemove('_02_01_00');
+  hamt.testEnumeration(2);
+  hamt2.testEnumeration(2);
+  hamt.testRemove('_02-01_00');
+  hamt.testEnumeration(1);
+  hamt2.testEnumeration(2);
   hamt.release;
   hamt2.release;
 
@@ -217,7 +241,7 @@ begin
   hamt.init;
   hamt.testInsert('_02_01_00', 'x1');
   hamt.testInsert('_02-01_00', 'x2');
-  hamt2 := THAMT_Test(hamt.snapshot);
+  hamt2 := THAMT_Test(hamt.clone);
   hamt.testInsert('_02x01_00', 'x3');
 
   hamt.testGet('_02_01_00', 'x1');
@@ -235,7 +259,7 @@ begin
   hamt.init;
   hamt.testInsert('_02_01_00', 'x1');
   hamt.testInsert('_02-01_00', 'x2');
-  hamt2 := THAMT_Test(hamt.snapshot);
+  hamt2 := THAMT_Test(hamt.clone);
   hamt.testInsert('_02-01_00', 'x3', true);
 
   hamt.testGet('_02_01_00', 'x1');
