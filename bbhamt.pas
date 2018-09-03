@@ -25,7 +25,6 @@ exception statement from your version.
 unit bbhamt;
 
 {$mode objfpc}{$H+}{$ModeSwitch autoderef}{$ModeSwitch advancedrecords}
-
 interface
 
 type
@@ -84,6 +83,7 @@ type
       fcurrent, pairLast: PPair;
       function pushNode(node: PHAMTNode): boolean;
     public
+      procedure initialize(node: PHAMTNode);
       property current: PPair read fcurrent;
       function MoveNext: boolean;
     end;
@@ -123,10 +123,16 @@ type
     class procedure release(var k: string); inline;
     class procedure assignRef(var target: string; const source: string); inline; //target := source with reference counting
     class procedure assignPtr(var target: string; const source: string); inline;   //assignment without reference counting
+
+    //no reference counting for objects
+    class procedure addRef(var {%H-}k: TObject); inline;
+    class procedure release(var {%H-}k: TObject); inline;
+    class procedure assignRef(var target: TObject; const source: TObject); inline;
+    class procedure assignPtr(var target: TObject; const source: TObject); inline;
   end;
   TInfo = type THAMTTypeInfo;
 
-  generic THAMT<TKey, TValue, TInfo> = packed object
+  generic TMutableMap<TKey, TValue, TInfo> = class
   type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
        PHAMTNode = ^THAMTNode;
        PPair = THAMTNode.PPair;
@@ -135,7 +141,8 @@ type
     froot: PHAMTNode;
   public
     property count: SizeInt read fcount;
-    procedure init;
+    constructor Create;
+    constructor Create(other: TMutableMap);
     {
     //insert override allowed = true
       result = true                  inserted, no override
@@ -149,17 +156,50 @@ type
     function get(const key: TKey; const def: TValue): TValue; inline;
     function remove(const key:TKey): boolean; inline;
     function getEnumerator: THAMTNode.THAMTEnumerator;
-    function clone: THAMT;
-    procedure release;
+    function clone: TMutableMap;
+    destructor Destroy; override;
   end;
 
-  type THAMTStringString = specialize THAMT<string, string, THAMTTypeInfo>;
+  generic TImmutableMap<TKey, TValue, TInfo> = class
+  type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
+       PHAMTNode = ^THAMTNode;
+       PPair = THAMTNode.PPair;
+  protected
+    fcount: SizeInt;
+    froot: PHAMTNode;
+  public
+    property count: SizeInt read fcount;
+    constructor Create;
+    constructor Create(other: TImmutableMap);
+    constructor Create(other: specialize TMutableMap<TKey, TValue, TInfo>);
+    {
+    //insert override allowed = true
+      result = true                  inserted, no override
+      result = false                 inserted, override
+    //insert override forbidden = false
+      result = true                  inserted, (no override)
+      result = false                 not inserted
+    }
+    function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): TImmutableMap;
+    function contains(const key:TKey): boolean; inline;
+    function get(const key: TKey; const def: TValue): TValue; inline;
+    function remove(const key:TKey): TImmutableMap; inline;
+    function getEnumerator: THAMTNode.THAMTEnumerator;
+    function clone: TImmutableMap;
+    destructor Destroy; override;
+  end;
+
+  TMutableMapStringString = specialize TMutableMap<string, string, THAMTTypeInfo>;
+  TMutableMapStringObject = specialize TMutableMap<string, TObject, THAMTTypeInfo>;
+  TImmutableMapStringString = specialize TImmutableMap<string, string, THAMTTypeInfo>;
+  TImmutableMapStringObject = specialize TImmutableMap<string, TObject, THAMTTypeInfo>;
 
 
   function alignedGetMem(s: PtrUInt): pointer; inline;
 
 
 implementation
+
 
 function THAMTNode.THAMTEnumerator.pushNode(node: PHAMTNode): boolean;
 begin
@@ -170,6 +210,16 @@ begin
   if result then begin
     fcurrent := node.getPairFromOffset(0);
     pairLast := current + node.pairCount - 1;
+  end;
+end;
+
+procedure THAMTNode.THAMTEnumerator.initialize(node: PHAMTNode);
+begin
+  level:=-1;
+  if pushNode(node) then dec(fcurrent)
+  else begin
+    fcurrent := nil;
+    pairLast := nil;
   end;
 end;
 
@@ -285,6 +335,26 @@ begin
   pointer(target) := pointer(source);
 end;
 
+class procedure THAMTTypeInfo.addRef(var k: TObject);
+begin
+
+end;
+
+class procedure THAMTTypeInfo.release(var k: TObject);
+begin
+
+end;
+
+class procedure THAMTTypeInfo.assignRef(var target: TObject; const source: TObject);
+begin
+  target := source;
+end;
+
+class procedure THAMTTypeInfo.assignPtr(var target: TObject; const source: TObject);
+begin
+  target := source;
+end;
+
 class procedure THAMTNode.hashShift(var hash: THAMTHash; out index: THAMTHash); inline;
 begin
   index := hash and %11111;
@@ -299,14 +369,7 @@ begin
   result := PopCnt(all and mask);
 end;
 
-function alignedGetMem(s: PtrUInt): pointer; inline;
-begin
-  result := GetMem(s);
-  while PtrUInt(result) and 1 = 1 do begin
-    Freemem(result);
-    result := GetMem(s);
-  end;
-end;
+
 
 class function THAMTNode.THAMTArray.size(aCount: integer): SizeInt;
 begin
@@ -365,6 +428,19 @@ begin
   else result := nil;
 end;
 
+{$push}
+{$WARN 4055 off : Conversion between ordinals and pointers is not portable}
+function alignedGetMem(s: PtrUInt): pointer; inline;
+begin
+  result := GetMem(s);
+  while PtrUInt(result) and 1 = 1 do begin
+    Freemem(result);
+    result := GetMem(s);
+  end;
+end;
+
+
+
 function THAMTTaggedPointer.unpack(out isArray: boolean): pointer; inline;
 var
   tag: PtrUInt;
@@ -378,6 +454,7 @@ procedure THAMTTaggedPointer.setToArray(p: pointer);
 begin
   raw := pointer(PtrUInt(p) or 1);
 end;
+{$pop}
 
 function THAMTNode.getPointerOffset(index: THAMTHash): DWord;
 begin
@@ -878,55 +955,119 @@ begin
 end;
 
 
-procedure THAMT.init;
+constructor TMutableMap.Create;
 begin
   froot := THAMTNode.allocate(0,0);
   fcount := 0;
 end;
 
-function THAMT.insert(const key: TKey; const value: TValue; allowOverride: boolean): boolean;
+constructor TMutableMap.Create(other: TMutableMap);
+begin
+  fcount := other.fcount;
+  froot := other.froot;
+  InterLockedIncrement(froot.refCount);
+end;
+
+function TMutableMap.insert(const key: TKey; const value: TValue; allowOverride: boolean): boolean;
 begin
   result := THAMTNode.insert(@froot, key, value, allowOverride);
   if Result then Inc(fcount);
 end;
 
-function THAMT.contains(const key: TKey): boolean;
+function TMutableMap.contains(const key: TKey): boolean;
 begin
   result := froot.contains(key);
 end;
 
-function THAMT.get(const key: TKey; const def: TValue): TValue;
+function TMutableMap.get(const key: TKey; const def: TValue): TValue;
 begin
   result := froot.get(key, def);
 end;
 
-function THAMT.remove(const key: TKey): boolean;
+function TMutableMap.remove(const key: TKey): boolean;
 begin
   result := THAMTNode.remove(@froot, key);
   if result then dec(fcount);
 end;
 
-function THAMT.getEnumerator: THAMTNode.THAMTEnumerator;
+function TMutableMap.getEnumerator: THAMTNode.THAMTEnumerator;
 begin
-  result.level:=-1;
-  if result.pushNode(froot) then dec(result.fcurrent)
-  else begin
-    result.fcurrent := nil;
-    result.pairLast := nil;
-  end;
+  result.initialize(froot);
 end;
 
-function THAMT.clone: THAMT;
+function TMutableMap.clone: TMutableMap;
 begin
-  result.fcount := fcount;
-  result.froot := froot;
+  result := TMutableMap.Create(self);
+end;
+
+destructor TMutableMap.Destroy;
+begin
+  THAMTNode.decrementRefCount(froot);
+  inherited;
+end;
+
+
+
+constructor TImmutableMap.Create;
+begin
+  froot := THAMTNode.allocate(0,0);
+  fcount := 0;
+end;
+
+constructor TImmutableMap.Create(other: TImmutableMap);
+begin
+  fcount := other.fcount;
+  froot := other.froot;
   InterLockedIncrement(froot.refCount);
 end;
 
-procedure THAMT.release;
+constructor TImmutableMap.Create(other: specialize TMutableMap<TKey, TValue, TInfo>);
+begin
+  fcount := other.fcount;
+  froot := other.froot;
+  InterLockedIncrement(froot.refCount);
+end;
+
+function TImmutableMap.insert(const key: TKey; const value: TValue; allowOverride: boolean): TImmutableMap;
+begin
+  result := TImmutableMap.Create(self);
+  if THAMTNode.insert(@result.froot, key, value, allowOverride) then
+    Inc(result.fcount);
+end;
+
+function TImmutableMap.contains(const key: TKey): boolean;
+begin
+  result := froot.contains(key);
+end;
+
+function TImmutableMap.get(const key: TKey; const def: TValue): TValue;
+begin
+  result := froot.get(key, def);
+end;
+
+function TImmutableMap.remove(const key: TKey): TImmutableMap;
+begin
+  result := TImmutableMap.Create(self);
+  if THAMTNode.remove(@result.froot, key) then
+    dec(result.fcount);
+end;
+
+function TImmutableMap.getEnumerator: THAMTNode.THAMTEnumerator;
+begin
+  result.initialize(froot);
+end;
+
+function TImmutableMap.clone: TImmutableMap;
+begin
+  result := TImmutableMap.Create(self);
+end;
+
+destructor TImmutableMap.Destroy;
 begin
   THAMTNode.decrementRefCount(froot);
+  inherited Destroy;
 end;
+
 
 end.
 

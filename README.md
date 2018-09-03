@@ -1,50 +1,56 @@
 Hash Array Mapped Trie
 ============
 
-Example
+Examples
 ------------
 
 Mutable:
 
 ```pascal
-var hamt: THAMTStringString;
-    p: THAMTStringString.PPair;
+var map: TMutableMapStringString;
+    p: TMutableMapStringString.PPair;
 begin
-  hamt.init;
-  hamt.Insert('hello', 'world');
-  hamt.insert('foo', 'bar');
+  map := TMutableMapStringString.create;
+  map.Insert('hello', 'world');
+  map.insert('foo', 'bar');
 
-  writeln(hamt.get('hello', 'default')); // world
-  writeln(hamt.get('foo', 'default')); // bar
+  writeln(map.get('hello', 'default')); // world
+  writeln(map.get('foo', 'default')); // bar
 
   //enumerate all
-  for p in hamt do
+  for p in map do
     writeln(p^.key, ': ', p^.value);
 
-  hamt.release;
+  map.free;
 end.
 ```
 
-Immutable using O(1) clone:
+Immutable:
 
 
 ```pascal
-var hamt1, hamt2: THAMTStringString;
-    p: THAMTStringString.PPair;
+var map, map2, map3: TImmutableMapStringString;
+    p: TImmutableMapStringString.PPair;
 begin
-  hamt1.init;
-  hamt1.Insert('hello', 'world');
-  hamt2 := hamt1.clone;
-  hamt2.insert('foo', 'bar');
+  map := TImmutableMapStringString.create;
+  map2 := map.Insert('hello', 'world');
+  map3 := map2.insert('foo', 'bar');
 
-  writeln(hamt1.get('hello', 'default')); // world
-  writeln(hamt1.get('foo', 'default'));   // default
+  writeln(map.get('hello', 'default')); // default
+  writeln(map.get('foo', 'default')); // default
 
-  hamt1.release;
+  writeln(map2.get('hello', 'default')); // world
+  writeln(map2.get('foo', 'default')); // default
 
-  writeln(hamt2.get('hello', 'default')); // world
-  writeln(hamt2.get('foo', 'default'));   // bar
+  writeln(map3.get('hello', 'default')); // world
+  writeln(map3.get('foo', 'default')); // bar
 
-  hamt2.release;
+  //enumerate all
+  for p in map3 do
+    writeln(p^.key, ': ', p^.value);
+
+  map.free;
+  map2.free;
+  map3.free;
 end.
 ```
