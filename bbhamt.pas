@@ -1,5 +1,5 @@
 {
-A collection of often needed functions missing in FPC
+Mutable and immutable map as hash array mapped trie (HAMT)
 
 Copyright (C) 2018         Benito van der Zander (BeniBela)
                            benito@benibela.de
@@ -36,7 +36,7 @@ type
     function countBeforeIndex(index: THAMTHash): DWord; inline;
     case boolean of
       false: (bits: bitpacked array[0..31] of boolean);
-      true: (all: Cardinal);
+      true: (all: THAMTHash);
   end;
   { 4 cases                                           bitmapIsSinglePointer          bitmapIsValue        pointer tag
      - next hamt node (pointer)                             true                        false                 0
@@ -295,7 +295,7 @@ function THAMTBitmap.countBeforeIndex(index: THAMTHash): DWord; inline;
 var
   mask: THAMTHash;
 begin
-  mask := (1 shl index) - 1;
+  mask := (THAMTHash(1) shl index) - 1;
   result := PopCnt(all and mask);
 end;
 
@@ -524,29 +524,29 @@ var
       pair: PPair;
       index2: THAMTHash;
   begin
+    ppnode := @ppnode^.pointers[offset].raw;
     while i <= LEVEL_HIGH do begin
       hashShift(h, index);
       hashShift(h2, index2);
       if index = index2 then begin
         //go to next level
         node := THAMTNode.allocate(1, 0);
-        node.bitmapIsSinglePointer.all := 1 shl index;
+        node.bitmapIsSinglePointer.all := THAMTHash(1) shl index;
         node.bitmapIsValue.all := 0;
-        ppnode^.pointers[offset].raw := node;
-        ppnode := @node.pointers[0];
-        offset := 0;
+        ppnode^ := node;
+        ppnode := @node.pointers[0].raw;
       end else begin
         //create node of old pairs and new pair
         if pairsIsArray then begin
           node := THAMTNode.allocate(1, 1);
-          node.bitmapIsSinglePointer.all := 1 shl index2;
-          node.bitmapIsValue.all := 1 shl index;
+          node.bitmapIsSinglePointer.all := THAMTHash(1) shl index2;
+          node.bitmapIsValue.all := THAMTHash(1) shl index;
           node.pointers[0].setToArray(pairs);
           dataOffset := 0;
         end else begin
           node := THAMTNode.allocate(0, 2);
           node.bitmapIsSinglePointer.all := 0;
-          node.bitmapIsValue.all := (1 shl index) or (1 shl index2);
+          node.bitmapIsValue.all := (THAMTHash(1) shl index) or (THAMTHash(1) shl index2);
           if index < index2 then dataOffset := 0 else dataOffset := 1;
           pair := node.getPairFromOffset(1 - dataOffset);
           TInfo.assignPtr(pair^.key, PPair(pairs).key);
@@ -557,7 +557,7 @@ var
         pair := node.getPairFromOffset(dataOffset);
         TInfo.assignRef(pair.key, key);
         TInfo.assignRef(pair.value, value);
-        ppnode^.pointers[offset].raw := node;
+        ppnode^ := node;
         exit;
       end;
     end;
@@ -676,7 +676,8 @@ end;
 class function THAMTNode.remove(ppnode: PPHAMTNode; const key: TKey): Boolean;
 var
   initialPPNode: PPHAMTNode;
-  offsets:  array[0..LEVEL_HIGH] of integer;
+  indices:  array[0..LEVEL_HIGH] of THAMTHash;
+  offsets:  array[0..LEVEL_HIGH] of integer; //offsets[i] := ... getPointerOffset(indices[i])
   nodes:  array[0..LEVEL_HIGH] of PHAMTNode; //nodes[0] := ppnode^; nodes[i] := nodes[i-1].pointers[offsets[i-1]].raw
 
   //make sure nodes[0]..nodes[tillLevel] have ref count 0
@@ -721,6 +722,7 @@ var
     // -> [ ..head..   ..pointerPrefix pointerSuffix....  ]
     move(node.bitmapIsSinglePointer, newNode.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * deleteOffset);
     move(node.pointers[deleteOffset + 1] , newNode.pointers[deleteOffset],  (node.pointerCount - deleteOffset - 1) * sizeof(pointer) + node.pairCount * sizeof(TPair) );
+    newNode.bitmapIsSinglePointer.bits[indices[level]] := False;
     if node.refCount > 1 then begin
       newNode.incrementChildrenRefCount;
       THAMTNode.decrementRefCount(node);
@@ -730,8 +732,10 @@ var
       else THAMTArray.decrementRefCount(p);
       Freemem(node);
     end;
-    if level > 0 then parentNode.pointers[offsets[level - 1]].raw := newNode
-    else ppnode^ := newNode;
+    if level > 0 then
+      parentNode.pointers[offsets[level - 1]].raw := newNode
+    else
+      initialPPNode^ := newNode;
   end;
 
 var
@@ -758,6 +762,7 @@ begin
       rawPointer := node.pointers[offset].unpack(pointerIsArray);
       nodes[i] := node;
       offsets[i] := offset;
+      indices[i] := index;
       if pointerIsArray then begin
         //remove from array
         hamtArray := PHAMTArray(rawPointer);
@@ -768,6 +773,7 @@ begin
           deletePointerFromNode(i);
           exit;
         end;
+        //todo: optimize special case hamtArray.count = 2 by converting array to in-node value
         node := uniqueAncestorNodes(i);
         newHamtArray := THAMTArray.allocate(hamtArray.count - 1);
         move(hamtArray.data[0], newHamtArray.data[0], sizeof(TPair) * pairIndex );
@@ -809,7 +815,7 @@ begin
         // -> [ ..head..   ..pointers....  ..pairPrefix..               ..pairSuffix.. ]
         move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * node.pointerCount + sizeof(TPair) * pairOffset);
         move(node.getPairFromOffset(pairOffset + 1)^ , ppnode^.getPairFromOffset(pairOffset)^, (node.pairCount - pairOffset - 1) * sizeof(TPair) ); //..pairSuffix..
-        if ppnode^.refCount > 1 then begin
+        if node.refCount > 1 then begin
           ppnode^.incrementChildrenRefCount;
           THAMTNode.decrementRefCount(node);
         end else begin
@@ -897,6 +903,7 @@ end;
 function THAMT.remove(const key: TKey): boolean;
 begin
   result := THAMTNode.remove(@froot, key);
+  if result then dec(fcount);
 end;
 
 function THAMT.getEnumerator: THAMTNode.THAMTEnumerator;

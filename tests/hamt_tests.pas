@@ -23,10 +23,14 @@ const MISSING = 'MISSING';
 
 
 procedure THAMT_Test.testInsert(const k, v: string; override: boolean);
+var c: integer;
 begin
+  c := count;
   test(insert(k, v) xor override, 'insert failed (override marker?)');
   test(contains(k), 'insert failed: ' + k);
   test(get(k, 'xx'), v);
+  if not override then inc(c);
+  test(count, c);
 end;
 
 procedure THAMT_Test.testGet(const k, v: string);
@@ -35,9 +39,13 @@ begin
 end;
 
 procedure THAMT_Test.testRemove(const k: string; notthere: boolean);
+var c: integer;
 begin
-  test(remove(k) <> notthere);
+  c := count;
+  test(remove(k) <> notthere, 'remove failed: ' + k);
   test(get(k, MISSING), MISSING);
+  if not notthere then dec(c);
+  test(count, c);
 end;
 
 procedure THAMT_Test.testEnumeration(expectedCount: integer);
@@ -252,6 +260,11 @@ begin
   hamt2.testGet('_02x01_00', MISSING);
   hamt.testEnumeration(3);
   hamt2.testEnumeration(2);
+  hamt.remove('_02_01_00');
+  hamt.remove('_02-01_00');
+  hamt.insert('_31_31_00', 'xy');
+  hamt.remove('_02x01_00');
+  hamt.remove('_31_31_00');
   hamt.release;
   hamt2.release;
 
@@ -268,9 +281,51 @@ begin
   hamt2.testGet('_02-01_00', 'x2');
   hamt.testEnumeration(2);
   hamt2.testEnumeration(2);
+
+  hamt.testRemove('_02_01_00');
+  hamt.testRemove('_02-01_00');
+  hamt2.testRemove('_02-01_00');
+  hamt.testEnumeration(0);
+  hamt2.testEnumeration(1);
+
   hamt.release;
   hamt2.release;
 
+
+  //more remove tests
+  hamt.init;
+  hamt.testInsert('_02_00_31', 'x1');
+  hamt.testInsert('_03-00_31', 'x2');
+  hamt2 := THAMT_Test(hamt.clone);
+  hamt.testRemove('_03_00_31', true);
+  hamt.testRemove('_03-00_31');
+  hamt2.testEnumeration(2);
+  hamt.testRemove('_02_00_31');
+  hamt.testEnumeration(0);
+  hamt2.testEnumeration(2);
+  hamt.release;
+  hamt2.release;
+
+  hamt.init;
+  hamt.testInsert('_00_00_00', 'x1');
+  hamt.testInsert('_31-31_31', 'x2');
+  hamt.testInsert('_30-31_31', 'x3');
+  hamt.testEnumeration(3);
+  hamt.testRemove('_31-31_31');
+  hamt.testEnumeration(2);
+  hamt.testRemove('_30-31_31');
+  hamt.testEnumeration(1);
+  hamt.release;
+
+  hamt.init;
+  hamt.testInsert('_31-31_31', 'x1');
+  hamt.testInsert('_31x31_31', 'x2');
+  hamt.testInsert('_00x00_01', 'x3');
+  hamt.testRemove('_31-31_31'); //makes _31x31_31 into an array
+  hamt2 := THAMT_Test(hamt.clone);
+  hamt.testRemove('_31x31_31');
+  hamt.release;
+  hamt2.release;
 
 end.
 
