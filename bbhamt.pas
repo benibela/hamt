@@ -1,6 +1,4 @@
 {
-Mutable and immutable map as hash array mapped trie (HAMT)
-
 Copyright (C) 2018         Benito van der Zander (BeniBela)
                            benito@benibela.de
                            www.benibela.de
@@ -22,11 +20,35 @@ you are not obligated to do so. If you do not wish to do so, delete this
 exception statement from your version.
 
 }
+{**
+@abstract(Mutable and immutable maps as hash array mapped trie (HAMT))
+
+Public generic classes:
+
+* TReadOnlyMap
+
+* TMutableMap
+
+* TImmutableMap
+
+Public specialized classes:
+
+* TMutableMapStringString
+
+* TMutableMapStringObject
+
+* TImmutableMapStringString
+
+* TImmutableMapStringObject
+
+}
 unit bbhamt;
 
 {$mode objfpc}{$H+}{$ModeSwitch autoderef}{$ModeSwitch advancedrecords}
+
 interface
 
+uses sysutils;
 type
   ppointer = ^pointer;
 
@@ -52,6 +74,11 @@ const
   BITS_PER_LEVEL = 5;
   LEVEL_HIGH = ( sizeof(THAMTHash) * 8 ) div BITS_PER_LEVEL;
 type
+  EHAMTKeyNotFound = class(Exception);
+  //** @abstract(Low-level HAMT from which the maps are built)
+  //** Each node has a reference count and up to 32 pointers or (key,value) pairs. @br
+  //** The HAMT node is either mutable (if reference count is 1) or immutable with copy-on-write (if reference count is >= 2) like strings. @br
+  //** Using the nodes directly would be more efficient than using the map classes, since you have one less memory access without the class instance.
   generic THAMTNode<TKey, TValue, TInfo> = packed object
     type
     PKey = ^TKey;
@@ -61,6 +88,10 @@ type
       value: TValue;
     end;
     PPair = ^TPair;
+    {Invariants:
+    - THAMTArray is not empty
+    - All keys in one THAMTArray have the same hash
+    }
     PHAMTArray = ^THAMTArray;
     THAMTArray = packed object
       refCount: Integer;
@@ -94,6 +125,7 @@ type
     bitmapIsSinglePointer: THAMTBitmap;
     bitmapIsValue: THAMTBitmap;
     pointers: array[0..63] of THAMTTaggedPointer;
+    class procedure raiseMissingKey(const key: TKey); static;
     function getPointerOffset(index: THAMTHash): DWord; inline;
     //function getPointer(index: THAMTHash): pointer; inline;
     function getPairOffset(index: THAMTHash): DWord; inline;
@@ -109,46 +141,6 @@ type
   public
     //trigger copy-on-write so the node becomes mutable
     class function uniqueNode(ppnode: PPHAMTNode): PHAMTNode;
-    class function insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; allowOverride: boolean): Boolean; static;
-    class function remove(ppnode: PPHAMTNode; const key: TKey): Boolean; static;
-    function find(const key:TKey): PPair;
-    function contains(const key:TKey):boolean;
-    function get(const key: TKey; const def: TValue): TValue;
-  end;
-  THAMTTypeInfo = object
-    class function hash(const s: string): THAMTHash;
-    class function equal(const s, t: string): boolean;
-
-    class procedure addRef(var k: string); inline;
-    class procedure release(var k: string); inline;
-    class procedure assignRef(var target: string; const source: string); inline; //target := source with reference counting
-    class procedure assignPtr(var target: string; const source: string); inline;   //assignment without reference counting
-
-    //no reference counting for objects
-    class procedure addRef(var {%H-}k: TObject); inline;
-    class procedure release(var {%H-}k: TObject); inline;
-    class procedure assignRef(var target: TObject; const source: TObject); inline;
-    class procedure assignPtr(var target: TObject; const source: TObject); inline;
-  end;
-
-  generic TRootedHAMT<TKey, TValue, TInfo> = class
-    type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
-         PHAMTNode = ^THAMTNode;
-         PPair = THAMTNode.PPair;
-    protected
-      fcount: SizeInt;
-      froot: PHAMTNode;
-    public
-      property count: SizeInt read fcount;
-      function contains(const key:TKey): boolean; inline;
-      function get(const key: TKey; const def: TValue): TValue; inline;
-      function getEnumerator: THAMTNode.THAMTEnumerator;
-      destructor Destroy; override;
-  end;
-
-  generic TMutableMap<TKey, TValue, TInfo> = class(specialize TRootedHAMT<TKey, TValue, TInfo>)
-    constructor Create;
-    constructor Create(other: TMutableMap);
     {
     //insert override allowed = true
       result = true                  inserted, no override
@@ -157,24 +149,182 @@ type
       result = true                  inserted, (no override)
       result = false                 not inserted
     }
-    function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean;
-    function remove(const key:TKey): boolean; inline;
-    function clone: TMutableMap;
+    class function insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; allowOverride: boolean): Boolean; static;
+    class function removeIfThere(ppnode: PPHAMTNode; const key: TKey): Boolean; static;
+    function find(const key:TKey): PPair;
+    function contains(const key:TKey):boolean;
+    function get(const key: TKey; const def: TValue): TValue;
+    function get(const key: TKey): TValue;
   end;
 
-  generic TImmutableMap<TKey, TValue, TInfo> = class(specialize TRootedHAMT<TKey, TValue, TInfo>)
+
+  //** @abstract(Default hash function and reference counting for string/TObject)
+  //** The HAMT requires a hash function (hash) and equality test (equal) to compare keys. @br
+  //** Memory management requires methods for reference counting (addRef, release) and copying (assignRef, assignNoRef). Reference counting is mandatory as the HAMT might make arbitrary many copies of everything. @br
+  //** You can derive an object of THAMTTypeInfo to change some methods, e.g., the hashing.
+  THAMTTypeInfo = object
+    class function hash(const s: string): THAMTHash;
+    class function equal(const s, t: string): boolean;
+
+    class procedure addRef(var k: string); inline;
+    class procedure release(var k: string); inline;
+    //** target := source with reference counting
+    class procedure assignRef(var target: string; const source: string); inline;
+    //** assignment without reference counting
+    class procedure assignNoRef(var target: string; const source: string); inline;
+    class function toString(const k: string): string; inline;
+
+    //no reference counting for objects
+    class procedure addRef(var {%H-}k: TObject); inline;
+    class procedure release(var {%H-}k: TObject); inline;
+    class procedure assignRef(var target: TObject; const source: TObject); inline;
+    class procedure assignNoRef(var target: TObject; const source: TObject); inline;
+    class function toString(const k: TObject): string; inline;
+  end;
+
+  //** @abstract(Generic read-only map)
+  //**
+  //** The data in this map can be read, but there are no methods to modify it.
+  generic TReadOnlyMap<TKey, TValue, TInfo> = class
+    type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
+         PHAMTNode = ^THAMTNode;
+         PPair = THAMTNode.PPair;
+    protected
+      fcount: SizeInt;
+      froot: PHAMTNode;
+    public
+      //** Returns if the map is empty
+      function isEmpty: boolean; inline;
+      //** Returns if the map contains a certain key
+      function contains(const key:TKey): boolean; inline;
+      //** Returns the value for a certain key, or default value def if the map does not contain the key
+      function get(const key: TKey; const def: TValue): TValue; inline;
+      //** Returns the value for a certain key, or raises an exception if the map does not contain the key
+      function get(const key: TKey): TValue; inline;
+      //** Enumerates all (key, value) pairs in an unspecified order @br
+      //** Example: @longcode(#
+      //** var p: TReadOnlyMap.PPair;
+      //** for p in map do
+      //**    .. p^.key .. p^.value ..
+      //** #)
+      //**
+      //**The pointer let's you modify the pair, but you must not modify it.
+      function getEnumerator: THAMTNode.THAMTEnumerator;
+      destructor Destroy; override;
+      //** Number of (key, value) pairs in the map
+      property count: SizeInt read fcount;
+      //** Default parameter, so you can read elements with @code(map[key])
+      property items[key: TKey]: TValue read get; default;
+  end;
+
+  {** @abstract(Generic mutable map)
+
+  Data in this map can be read (see ancestor TReadOnlyMap) and modified.
+
+  Example:
+
+  @longcode(#
+    type TMutableMapStringString = specialize TMutableMap<string, string, THAMTTypeInfo>;
+    var map: TMutableMapStringString;
+        p: TMutableMapStringString.PPair;
+    begin
+      map := TMutableMapStringString.create;
+      map.Insert('hello', 'world');
+      map.insert('foo', 'bar');
+      map['abc'] := 'def';
+
+      writeln(map['hello']); // world
+      writeln(map.get('foo')); // bar
+      writeln(map.get('abc', 'default')); // def
+
+      //enumerate all
+      for p in map do
+        writeln(p^.key, ': ', p^.value);
+
+      map.free;
+    end.
+  #)
+  }
+  generic TMutableMap<TKey, TValue, TInfo> = class(specialize TReadOnlyMap<TKey, TValue, TInfo>)
+  private
+    procedure insertItem(const key: TKey; const value: TValue);
   public
+    //** Creates an empty map
     constructor Create;
-    constructor Create(other: TImmutableMap);
-    constructor Create(other: specialize TMutableMap<TKey, TValue, TInfo>);
+    //** Creates a map equal to other. No data is copied, till either map is modified (copy-on-write).
+    constructor Create(other: specialize TReadOnlyMap<TKey, TValue, TInfo>);
+    //** Inserts a (key, value) pair, if the map does not contain key or allowOverride is true.
+    //** @returns If the map did not contain key.
+    function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean;
+    //** Removes key (and the associated value), or raises an exception if the map did not contain key
+    procedure remove(const key:TKey); inline;
+    //** Removes everything from the map;
+    procedure clear;
+    //** Creates a new map equal to self. No data is copied, till either map is modified (copy-on-write).
+    function clone: TMutableMap;
+    //** Default parameter, so you can read or write elements with @code(map[key])
+    property items[key: TKey]: TValue read get write insertItem; default;
+  end;
+
+  {** @abstract(Generic immutable map)
+
+  Data in this map can be read (see ancestor TReadOnlyMap) and modified by creating new maps.
+
+  Example: @longcode(#
+  type TImmutableMapStringString = specialize TImmutableMap<string, string, THAMTTypeInfo>;
+  var map, map2, map3: TImmutableMapStringString;
+    p: TImmutableMapStringString.PPair;
+  begin
+    map := TImmutableMapStringString.create;
+    map2 := map.Insert('hello', 'world');
+    map3 := map2.insert('foo', 'bar');
+
+    writeln(map.get('hello', 'default')); // default
+    writeln(map.get('foo', 'default')); // default
+
+    writeln(map2.get('hello')); // world
+    writeln(map2.get('foo', 'default')); // default
+
+    writeln(map3['hello']); // world
+    writeln(map3['foo']); // bar
+
+    //enumerate all
+    for p in map3 do
+      writeln(p^.key, ': ', p^.value);
+
+    map.free;
+    map2.free;
+    map3.free;
+  end.
+  #)
+  }
+  generic TImmutableMap<TKey, TValue, TInfo> = class(specialize TReadOnlyMap<TKey, TValue, TInfo>)
+  public
+    //** Creates an empty map
+    constructor Create;
+    //** Creates a map equal to other. No data is copied, till either map is modified (copy-on-write).
+    constructor Create(other: specialize TReadOnlyMap<TKey, TValue, TInfo>);
+    //** Creates a new map containing key @code(key). If the map does not contain key or allowOverride is true, the value associated with the key is @code(value), otherwise the value is unchanged.
+    //** @returns The new map
     function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): TImmutableMap;
+    //** Creates a new map without key and its associated value, or raises an exception if the map did not contain key
+    //** @returns The new map
     function remove(const key:TKey): TImmutableMap; inline;
+    //** Creates a new map equal to self. No data is copied, till either map is modified (copy-on-write).
     function clone: TImmutableMap;
   end;
 
+  //** @abstract(A TMutableMap mapping string keys to string values.)
+  //** The map handles reference counting and freeing of the strings.
   TMutableMapStringString = specialize TMutableMap<string, string, THAMTTypeInfo>;
+  //** @abstract(A TMutableMap mapping string keys to TObject values.)
+  //** The map handles reference counting and freeing of the string keys, but the objects are neither changed nor freed.
   TMutableMapStringObject = specialize TMutableMap<string, TObject, THAMTTypeInfo>;
+  //** @abstract(A TImmutableMap mapping string keys to string values.)
+  //** The map handles reference counting and freeing of the strings.
   TImmutableMapStringString = specialize TImmutableMap<string, string, THAMTTypeInfo>;
+  //** @abstract(A TImmutableMap mapping string keys to TObject values.)
+  //** The map handles reference counting and freeing of the string keys, but the objects are neither changed nor freed.
   TImmutableMapStringObject = specialize TImmutableMap<string, TObject, THAMTTypeInfo>;
 
 
@@ -313,19 +463,24 @@ begin
   target := source;
 end;
 
-class procedure THAMTTypeInfo.assignPtr(var target: string; const source: string);
+class procedure THAMTTypeInfo.assignNoRef(var target: string; const source: string);
 begin
   pointer(target) := pointer(source);
 end;
 
+class function THAMTTypeInfo.toString(const k: string): string;
+begin
+  result := k
+end;
+
 class procedure THAMTTypeInfo.addRef(var k: TObject);
 begin
-
+  //empty
 end;
 
 class procedure THAMTTypeInfo.release(var k: TObject);
 begin
-
+  //empty
 end;
 
 class procedure THAMTTypeInfo.assignRef(var target: TObject; const source: TObject);
@@ -333,9 +488,14 @@ begin
   target := source;
 end;
 
-class procedure THAMTTypeInfo.assignPtr(var target: TObject; const source: TObject);
+class procedure THAMTTypeInfo.assignNoRef(var target: TObject; const source: TObject);
 begin
   target := source;
+end;
+
+class function THAMTTypeInfo.toString(const k: TObject): string;
+begin
+  result := k.ToString;
 end;
 
 class procedure THAMTNode.hashShift(var hash: THAMTHash; out index: THAMTHash); inline;
@@ -438,6 +598,11 @@ begin
   raw := pointer(PtrUInt(p) or 1);
 end;
 {$pop}
+
+class procedure THAMTNode.raiseMissingKey(const key: TKey);
+begin
+  raise EHAMTKeyNotFound.Create('Key not found: '+TInfo.toString(key));
+end;
 
 function THAMTNode.getPointerOffset(index: THAMTHash): DWord;
 begin
@@ -561,9 +726,9 @@ var pairIndex: Integer;
       result := THAMTArray.allocate(hamtArray.count + 1);
       pairIndex := hamtArray.count;
       pair := @PHAMTArray(result).data[pairIndex];
-      TInfo.assignPtr(pair.key, key);
+      TInfo.assignNoRef(pair.key, key);
       TInfo.addRef(pair.key);
-      TInfo.assignPtr(pair.value, Default(TValue));
+      TInfo.assignNoRef(pair.value, Default(TValue));
     end else
       result := THAMTArray.allocate(hamtArray.count);
     move(hamtArray.data[0], PHAMTArray(result).data[0], hamtArray.count * sizeof(TPair));
@@ -609,8 +774,8 @@ var
           node.bitmapIsValue.all := (THAMTHash(1) shl index) or (THAMTHash(1) shl index2);
           if index < index2 then dataOffset := 0 else dataOffset := 1;
           pair := node.getPairFromOffset(1 - dataOffset);
-          TInfo.assignPtr(pair^.key, PPair(pairs).key);
-          TInfo.assignPtr(pair^.value, PPair(pairs).value);
+          TInfo.assignNoRef(pair^.key, PPair(pairs).key);
+          TInfo.assignNoRef(pair^.value, PPair(pairs).value);
           TInfo.addRef(pair^.key);
           TInfo.addRef(pair^.value);
         end;
@@ -701,8 +866,8 @@ begin
         end;
         hamtArray := THAMTArray.allocate(2);
         fillchar(hamtArray.data[0], sizeof(TPair) * 2, 0);
-        TInfo.assignPtr(hamtArray.data[0].key, pair.key);
-        TInfo.assignPtr(hamtArray.data[0].value, pair.value);
+        TInfo.assignNoRef(hamtArray.data[0].key, pair.key);
+        TInfo.assignNoRef(hamtArray.data[0].value, pair.value);
         TInfo.assignRef(hamtArray.data[1].key, key);
         TInfo.assignRef(hamtArray.data[1].value, value);
         ppnode^.pointers[offset].setToArray(hamtArray);
@@ -733,7 +898,7 @@ begin
   end;
 end;
 
-class function THAMTNode.remove(ppnode: PPHAMTNode; const key: TKey): Boolean;
+class function THAMTNode.removeIfThere(ppnode: PPHAMTNode; const key: TKey): Boolean;
 var
   initialPPNode: PPHAMTNode;
   indices:  array[0..LEVEL_HIGH] of THAMTHash;
@@ -937,28 +1102,50 @@ begin
   else result := pair.value;
 end;
 
+function THAMTNode.get(const key: TKey): TValue;
+var
+  pair: PPair;
+begin
+  pair := find(key);
+  if pair = nil then raiseMissingKey(key);
+  result := pair.value;
+end;
 
-function TRootedHAMT.contains(const key: TKey): boolean;
+function TReadOnlyMap.isEmpty: boolean;
+begin
+  result := count = 0;
+end;
+
+function TReadOnlyMap.contains(const key: TKey): boolean;
 begin
   result := froot.contains(key);
 end;
 
-function TRootedHAMT.get(const key: TKey; const def: TValue): TValue;
+function TReadOnlyMap.get(const key: TKey; const def: TValue): TValue;
 begin
   result := froot.get(key, def);
 end;
 
-function TRootedHAMT.getEnumerator: THAMTNode.THAMTEnumerator;
+function TReadOnlyMap.get(const key: TKey): TValue;
+begin
+  result := froot.get(key);
+end;
+
+function TReadOnlyMap.getEnumerator: THAMTNode.THAMTEnumerator;
 begin
   result.initialize(froot);
 end;
 
-destructor TRootedHAMT.Destroy;
+destructor TReadOnlyMap.Destroy;
 begin
   THAMTNode.decrementRefCount(froot);
   inherited;
 end;
 
+procedure TMutableMap.insertItem(const key: TKey; const value: TValue);
+begin
+  insert(key, value, true);
+end;
 
 constructor TMutableMap.Create;
 begin
@@ -966,7 +1153,7 @@ begin
   fcount := 0;
 end;
 
-constructor TMutableMap.Create(other: TMutableMap);
+constructor TMutableMap.Create(other: specialize TReadOnlyMap<TKey, TValue, TInfo>);
 begin
   fcount := other.fcount;
   froot := other.froot;
@@ -979,10 +1166,17 @@ begin
   if Result then Inc(fcount);
 end;
 
-function TMutableMap.remove(const key: TKey): boolean;
+procedure TMutableMap.remove(const key: TKey);
 begin
-  result := THAMTNode.remove(@froot, key);
-  if result then dec(fcount);
+  if not THAMTNode.removeIfThere(@froot, key) then THAMTNode.raiseMissingKey(key);
+  dec(fcount);
+end;
+
+procedure TMutableMap.clear;
+begin
+  THAMTNode.decrementRefCount(froot);
+  froot := THAMTNode.allocate(0,0);
+  fcount := 0;
 end;
 
 
@@ -1000,14 +1194,7 @@ begin
   fcount := 0;
 end;
 
-constructor TImmutableMap.Create(other: TImmutableMap);
-begin
-  fcount := other.fcount;
-  froot := other.froot;
-  InterLockedIncrement(froot.refCount);
-end;
-
-constructor TImmutableMap.Create(other: specialize TMutableMap<TKey, TValue, TInfo>);
+constructor TImmutableMap.Create(other: specialize TReadOnlyMap<TKey, TValue, TInfo>);
 begin
   fcount := other.fcount;
   froot := other.froot;
@@ -1024,8 +1211,11 @@ end;
 function TImmutableMap.remove(const key: TKey): TImmutableMap;
 begin
   result := TImmutableMap.Create(self);
-  if THAMTNode.remove(@result.froot, key) then
-    dec(result.fcount);
+  if not THAMTNode.removeIfThere(@result.froot, key) then begin
+    result.free;
+    THAMTNode.raiseMissingKey(key);
+  end;
+  dec(result.fcount);
 end;
 
 function TImmutableMap.clone: TImmutableMap;

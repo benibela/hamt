@@ -31,6 +31,7 @@ begin
   test(get(k, 'xx'), v);
   if not override then inc(c);
   test(count, c);
+  test((c = 0) = isEmpty);
 end;
 
 procedure TMutableMap_Test.testGet(const k, v: string);
@@ -42,7 +43,10 @@ procedure TMutableMap_Test.testRemove(const k: string; notthere: boolean);
 var c: integer;
 begin
   c := count;
-  test(remove(k) <> notthere, 'remove failed: ' + k);
+  if notthere then
+    test(THAMTNode.removeIfThere(@froot, k) <> notthere, 'remove failed: ' + k)
+   else remove(k);
+//    test( <> notthere, 'remove failed: ' + k);
   test(get(k, MISSING), MISSING);
   if not notthere then dec(c);
   test(count, c);
@@ -74,6 +78,7 @@ begin
 //  test( xor override, 'insert failed (override marker?)');
   test(result.contains(k), 'insert failed: ' + k);
   test(result.get(k, 'xx'), v);
+  test(result[k], v);
   test(m.count, c);
   if not override then
     inc(c);
@@ -117,6 +122,8 @@ begin
 
   hamt.testEnumeration(2);
   hamt.remove('hello');
+  hamt['abc'] := 'def';
+  hamt.testGet('abc', 'def');
   hamt.free;
 
 
