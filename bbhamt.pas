@@ -130,17 +130,23 @@ type
     class procedure assignRef(var target: TObject; const source: TObject); inline;
     class procedure assignPtr(var target: TObject; const source: TObject); inline;
   end;
-  TInfo = type THAMTTypeInfo;
 
-  generic TMutableMap<TKey, TValue, TInfo> = class
-  type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
-       PHAMTNode = ^THAMTNode;
-       PPair = THAMTNode.PPair;
-  protected
-    fcount: SizeInt;
-    froot: PHAMTNode;
-  public
-    property count: SizeInt read fcount;
+  generic TRootedHAMT<TKey, TValue, TInfo> = class
+    type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
+         PHAMTNode = ^THAMTNode;
+         PPair = THAMTNode.PPair;
+    protected
+      fcount: SizeInt;
+      froot: PHAMTNode;
+    public
+      property count: SizeInt read fcount;
+      function contains(const key:TKey): boolean; inline;
+      function get(const key: TKey; const def: TValue): TValue; inline;
+      function getEnumerator: THAMTNode.THAMTEnumerator;
+      destructor Destroy; override;
+  end;
+
+  generic TMutableMap<TKey, TValue, TInfo> = class(specialize TRootedHAMT<TKey, TValue, TInfo>)
     constructor Create;
     constructor Create(other: TMutableMap);
     {
@@ -152,41 +158,18 @@ type
       result = false                 not inserted
     }
     function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean;
-    function contains(const key:TKey): boolean; inline;
-    function get(const key: TKey; const def: TValue): TValue; inline;
     function remove(const key:TKey): boolean; inline;
-    function getEnumerator: THAMTNode.THAMTEnumerator;
     function clone: TMutableMap;
-    destructor Destroy; override;
   end;
 
-  generic TImmutableMap<TKey, TValue, TInfo> = class
-  type THAMTNode = specialize THAMTNode<TKey, TValue, TInfo>;
-       PHAMTNode = ^THAMTNode;
-       PPair = THAMTNode.PPair;
-  protected
-    fcount: SizeInt;
-    froot: PHAMTNode;
+  generic TImmutableMap<TKey, TValue, TInfo> = class(specialize TRootedHAMT<TKey, TValue, TInfo>)
   public
-    property count: SizeInt read fcount;
     constructor Create;
     constructor Create(other: TImmutableMap);
     constructor Create(other: specialize TMutableMap<TKey, TValue, TInfo>);
-    {
-    //insert override allowed = true
-      result = true                  inserted, no override
-      result = false                 inserted, override
-    //insert override forbidden = false
-      result = true                  inserted, (no override)
-      result = false                 not inserted
-    }
     function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): TImmutableMap;
-    function contains(const key:TKey): boolean; inline;
-    function get(const key: TKey; const def: TValue): TValue; inline;
     function remove(const key:TKey): TImmutableMap; inline;
-    function getEnumerator: THAMTNode.THAMTEnumerator;
     function clone: TImmutableMap;
-    destructor Destroy; override;
   end;
 
   TMutableMapStringString = specialize TMutableMap<string, string, THAMTTypeInfo>;
@@ -955,6 +938,28 @@ begin
 end;
 
 
+function TRootedHAMT.contains(const key: TKey): boolean;
+begin
+  result := froot.contains(key);
+end;
+
+function TRootedHAMT.get(const key: TKey; const def: TValue): TValue;
+begin
+  result := froot.get(key, def);
+end;
+
+function TRootedHAMT.getEnumerator: THAMTNode.THAMTEnumerator;
+begin
+  result.initialize(froot);
+end;
+
+destructor TRootedHAMT.Destroy;
+begin
+  THAMTNode.decrementRefCount(froot);
+  inherited;
+end;
+
+
 constructor TMutableMap.Create;
 begin
   froot := THAMTNode.allocate(0,0);
@@ -974,37 +979,18 @@ begin
   if Result then Inc(fcount);
 end;
 
-function TMutableMap.contains(const key: TKey): boolean;
-begin
-  result := froot.contains(key);
-end;
-
-function TMutableMap.get(const key: TKey; const def: TValue): TValue;
-begin
-  result := froot.get(key, def);
-end;
-
 function TMutableMap.remove(const key: TKey): boolean;
 begin
   result := THAMTNode.remove(@froot, key);
   if result then dec(fcount);
 end;
 
-function TMutableMap.getEnumerator: THAMTNode.THAMTEnumerator;
-begin
-  result.initialize(froot);
-end;
 
 function TMutableMap.clone: TMutableMap;
 begin
   result := TMutableMap.Create(self);
 end;
 
-destructor TMutableMap.Destroy;
-begin
-  THAMTNode.decrementRefCount(froot);
-  inherited;
-end;
 
 
 
@@ -1035,16 +1021,6 @@ begin
     Inc(result.fcount);
 end;
 
-function TImmutableMap.contains(const key: TKey): boolean;
-begin
-  result := froot.contains(key);
-end;
-
-function TImmutableMap.get(const key: TKey; const def: TValue): TValue;
-begin
-  result := froot.get(key, def);
-end;
-
 function TImmutableMap.remove(const key: TKey): TImmutableMap;
 begin
   result := TImmutableMap.Create(self);
@@ -1052,22 +1028,10 @@ begin
     dec(result.fcount);
 end;
 
-function TImmutableMap.getEnumerator: THAMTNode.THAMTEnumerator;
-begin
-  result.initialize(froot);
-end;
-
 function TImmutableMap.clone: TImmutableMap;
 begin
   result := TImmutableMap.Create(self);
 end;
-
-destructor TImmutableMap.Destroy;
-begin
-  THAMTNode.decrementRefCount(froot);
-  inherited Destroy;
-end;
-
 
 end.
 
