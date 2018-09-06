@@ -3,7 +3,7 @@ Hash Array Mapped Trie (HAMT)
 
 A HAMT is a hashmap stored as trie, which provides update and lookup performance similarly to a normal hashmap, but needs no rehashing and also allows one to copy the entire map in constant time.  This implementation uses a 32 bit hash and trie nodes with 32 children, so 5 bits of the hash are consumed to choose the next child. When there are no hash collisions, this HAMT can store 2^32 items with a maximal tree depth of (log_32 2^32) = 6, i.e., you need 6 memory accesses to find any key/value which is practically O(1). (When there are hash collisions, they are put in an array)
 
-Each HAMT node carries an reference counter, since FreePascal has no garbage collector. If the reference counter is 1, the node can mutate, otherwise it is immutable with a copy-on-write semantics like strings. The counter is updated atomically, so the map could be sharied across threads. 
+Each HAMT node carries a reference counter, since FreePascal has no garbage collector. If the reference count is 1, the node can mutate, otherwise it is immutable with a copy-on-write semantic like strings. The counter is updated atomically, so the map could be shared across threads. 
 
 Everything is implemented using generics, so it can be used with all types.
 

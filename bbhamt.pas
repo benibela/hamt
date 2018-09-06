@@ -76,8 +76,8 @@ const
 type
   EHAMTKeyNotFound = class(Exception);
   //** @abstract(Low-level HAMT from which the maps are built)
-  //** Each node has a reference count and up to 32 pointers or (key,value) pairs. @br
-  //** The HAMT node is either mutable (if reference count is 1) or immutable with copy-on-write (if reference count is >= 2) like strings. @br
+  //** Each node has a reference counter and stores up to 32 pointers or (key,value) pairs. @br
+  //** The HAMT node is either mutable (if reference counter is 1) or immutable with copy-on-write (if reference counter is >= 2) like strings. @br
   //** Using the nodes directly would be more efficient than using the map classes, since you have one less memory access without the class instance.
   generic THAMTNode<TKey, TValue, TInfo> = packed object
     type
@@ -657,8 +657,7 @@ var
   i: Integer;
 begin
   with node^ do begin
-    InterLockedDecrement(refCount);
-    if refCount <= 0 then begin
+    if InterLockedDecrement(refCount) = 0 then begin
       for i := 0 to pointerCount - 1 do begin
         pointerRaw := pointers[i].unpack(isArray);
         if isArray then THAMTArray.decrementRefCount(PHAMTArray(pointerRaw))
@@ -705,9 +704,9 @@ begin
     result.incrementChildrenRefCount;
 
     s := size(result.pointerCount, result.pairCount);
-    ppnode^ := alignedGetMem(s);
+    ppnode^ := alignedGetMem(s); //new node
     move(result^, ppnode^^, s);
-    decrementRefCount(result);
+    decrementRefCount(result); //result is still the old node
     ppnode^^.refCount := 1;
     result := ppnode^;
   end;
