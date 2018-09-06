@@ -797,7 +797,6 @@ var
           if index < index2 then dataOffset := 0 else dataOffset := 1;
           pair := node.getPairFromOffset(1 - dataOffset);
           PPairSizeEquivalent(pair)^ := PPairSizeEquivalent(pairs)^;
-          pair.addRef();
         end;
         pair := node.getPairFromOffset(dataOffset);
         assignKeyRef(pair.key, key);
@@ -866,7 +865,6 @@ begin
       pair := node.getPairFromOffset(pairOffset);
       if not tinfo.equal(pair.key, key) then begin
         //change pair to array pointer
-        if node.refCount > 1 then node.incrementChildrenRefCount;
         offset := node.getPointerOffset(index);
         ppnode^ := allocate(node.pointerCount + 1, node.pairCount - 1);
         //    [ ..head..   ..pointerPrefix..            ..pointerSuffix..    ..pairPrefix..   old pair    ..pairSuffix.. ]
@@ -876,21 +874,28 @@ begin
         move(node.getPairFromOffset(pairOffset + 1)^ , ppnode^.getPairFromOffset(pairOffset)^, (node.pairCount - pairOffset - 1) * sizeof(TPair) ); //..pairSuffix..
         ppnode^.bitmapIsSinglePointer.bits[index] := true;
         ppnode^.bitmapIsValue.bits[index] := False;
+        result := true;
         if i < LEVEL_HIGH then begin
           h2 := TInfo.hash(pair.key) shr (BITS_PER_LEVEL * i + BITS_PER_LEVEL);
           if h <> h2 then begin
             movePairsDown(false, pair);
-            decrementRefCount(node);
-            exit;
+            result := false;
           end;
         end;
-        hamtArray := THAMTArray.allocate(2);
-        PPairSizeEquivalent(hamtArray^[0])^ := PPairSizeEquivalent(pair)^;
-        TKeySizeEquivalent(hamtArray^[1].key) := TKeySizeEquivalent(key);
-        TValueSizeEquivalent(hamtArray^[1].value) := TValueSizeEquivalent(value);
-        hamtArray^[1].addRef();
-        ppnode^.pointers[offset].setToArray(hamtArray);
-        decrementRefCount(node);
+        if result then begin
+          hamtArray := THAMTArray.allocate(2);
+          PPairSizeEquivalent(hamtArray^[0])^ := PPairSizeEquivalent(pair)^;
+          TKeySizeEquivalent(hamtArray^[1].key) := TKeySizeEquivalent(key);
+          TValueSizeEquivalent(hamtArray^[1].value) := TValueSizeEquivalent(value);
+          hamtArray^[1].addRef();
+          ppnode^.pointers[offset].setToArray(hamtArray);
+        end else result := true;
+        if node.refCount > 1 then begin
+          node.incrementChildrenRefCount;
+          decrementRefCount(node);
+        end else begin
+          Freemem(node);
+        end;
       end else begin
         result := false;
         if not allowOverride then exit;
