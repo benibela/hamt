@@ -150,6 +150,7 @@ type
     class procedure assignValueRef(var target: TValue; const source: TValue); static; inline;
   public
     class procedure decrementRefCount(node: PHAMTNode); static;
+    class procedure decrementRefCountButKeepChildren(node: PHAMTNode); static;
     class function allocate(apointerCount, apairCount: integer): PHAMTNode; static;
   public
     //trigger copy-on-write so the node becomes mutable
@@ -696,6 +697,15 @@ begin
   end;
 end;
 
+class procedure THAMTNode.decrementRefCountButKeepChildren(node: PHAMTNode);
+begin
+  if node.refCount <= 1 then Freemem(node)
+  else begin
+    node.incrementChildrenRefCount;
+    decrementRefCount(node);
+  end;
+end;
+
 class function THAMTNode.size(apointerCount, apairCount: integer): SizeInt;
 begin
   size := SizeOf(THAMTNode.refCount) + SizeOf(THAMTNode.pointerCount) + SizeOf(THAMTNode.pairCount) + SizeOf(THAMTNode.bitmapIsSinglePointer) + SizeOf(THAMTNode.bitmapIsValue)
@@ -890,12 +900,7 @@ begin
           hamtArray^[1].addRef();
           ppnode^.pointers[offset].setToArray(hamtArray);
         end else result := true;
-        if node.refCount > 1 then begin
-          node.incrementChildrenRefCount;
-          decrementRefCount(node);
-        end else begin
-          Freemem(node);
-        end;
+        decrementRefCountButKeepChildren(node);
       end else begin
         result := false;
         if not allowOverride then exit;
@@ -912,10 +917,7 @@ begin
       pair := ppnode^.getPairFromOffset(offset);
       assignKeyRef(pair.key, key);
       assignValueRef(pair.value, value);
-      if node.refCount > 1 then begin
-        node.incrementChildrenRefCount;
-        decrementRefCount(node)
-      end else Freemem(node);
+      decrementRefCountButKeepChildren(node);
       ppnode^.bitmapIsValue.bits[index] := true;
       exit;
     end;
@@ -972,15 +974,10 @@ var
     move(node.bitmapIsSinglePointer, newNode.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * deleteOffset);
     move(node.pointers[deleteOffset + 1] , newNode.pointers[deleteOffset],  (node.pointerCount - deleteOffset - 1) * sizeof(pointer) + node.pairCount * sizeof(TPair) );
     newNode.bitmapIsSinglePointer.bits[indices[level]] := False;
-    if node.refCount > 1 then begin
-      newNode.incrementChildrenRefCount;
-      THAMTNode.decrementRefCount(node);
-    end else begin
-      p := node.pointers[deleteOffset].unpack(isArray);
-      if not isArray then THAMTNode.decrementRefCount(p)
-      else THAMTArray.decrementRefCount(p);
-      Freemem(node);
-    end;
+    p := node.pointers[deleteOffset].unpack(isArray);
+    decrementRefCountButKeepChildren(node);
+    if not isArray then THAMTNode.decrementRefCount(p) //need to decrement RC again in case decrementRefCountButKeepChildren incremented it
+    else THAMTArray.decrementRefCount(p);
     if level > 0 then
       parentNode.pointers[offsets[level - 1]].raw := newNode
     else
@@ -1085,13 +1082,15 @@ var
   h, index: THAMTHash;
   rawPointer: Pointer;
   pointerIsArray: boolean;
+  offset: THAMTHash;
 begin
   node := @self;
   h := TInfo.hash(key);
   for i := 0 to LEVEL_HIGH do begin
     hashShift(h, index);
     if node.bitmapIsSinglePointer.bits[index] then begin
-      rawPointer := node.pointers[node.getPointerOffset(index)].unpack(pointerIsArray);
+      offset := node.getPointerOffset(index);
+      rawPointer := node.pointers[offset].unpack(pointerIsArray);
       if pointerIsArray then
         exit(PHAMTArray(rawPointer).find(key))
        else
