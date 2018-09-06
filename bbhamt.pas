@@ -86,6 +86,7 @@ type
     TPair = packed record
       key: TKey;
       value: TValue;
+      procedure init(const k: TKey; const v: TValue); inline;
       procedure addRef(); inline;
       procedure release(); inline;
     end;
@@ -100,7 +101,7 @@ type
       count: integer;
       firstPair: array[0..0] of TPair;
       class function size(aCount: integer): SizeInt; static; inline;
-      class function allocate(acount: integer): PHAMTArray; static;
+      class function allocate(acount: integer): PHAMTArray; static; //not initialized besides counts
       class procedure decrementRefCount(a: PHAMTArray); static;
       procedure incrementChildrenRefCount;
       function indexOf(const key: TKey): integer;
@@ -151,7 +152,8 @@ type
   public
     class procedure decrementRefCount(node: PHAMTNode); static;
     class procedure decrementRefCountButKeepChildren(node: PHAMTNode); static;
-    class function allocate(apointerCount, apairCount: integer): PHAMTNode; static;
+    class function allocate(apointerCount, apairCount: integer): PHAMTNode; static; //memory not initialized besides counts
+    class function allocateEmpty(): PHAMTNode; static; //memory initialized
   public
     //trigger copy-on-write so the node becomes mutable
     class function uniqueNode(ppnode: PPHAMTNode): PHAMTNode;
@@ -343,6 +345,13 @@ type
 
 
 implementation
+
+procedure THAMTNode.TPair.init(const k: TKey; const v: TValue);
+begin
+  TKeySizeEquivalent(key) := TKeySizeEquivalent(k);
+  TValueSizeEquivalent(value) := TValueSizeEquivalent(v);
+  addRef();
+end;
 
 procedure THAMTNode.TPair.addRef();
 begin
@@ -684,10 +693,21 @@ var
 begin
   s := size(apointerCount, apairCount);
   result := alignedGetMem(s);
-  FillChar(result^, s, 0);
   result^.refCount := 1;
   result^.pointerCount := apointerCount;
   result^.pairCount := apairCount;
+end;
+
+class function THAMTNode.allocateEmpty(): PHAMTNode;
+const
+  s: SizeInt = SizeOf(THAMTNode.refCount) + SizeOf(THAMTNode.pointerCount) + SizeOf(THAMTNode.pairCount) + SizeOf(THAMTNode.bitmapIsSinglePointer) + SizeOf(THAMTNode.bitmapIsValue);
+begin
+  result := alignedGetMem(s);
+  result^.refCount := 1;
+  result^.pointerCount := 0;
+  result^.pairCount := 0;
+  result^.bitmapIsSinglePointer.all := 0;
+  result^.bitmapIsValue.all := 0;
 end;
 
 class function THAMTNode.uniqueNode(ppnode: PPHAMTNode): PHAMTNode;
@@ -714,20 +734,16 @@ end;
 class function THAMTNode.insert(ppnode: PPHAMTNode; const key: TKey; const value: TValue; allowOverride: boolean): Boolean;
 
 var pairIndex: Integer;
-  function cloneArray(hamtArrayx: pointer): pointer;
+  function cloneArrayAppend(hamtArrayx: pointer; append: boolean): pointer;
   var HAMTArray: PHAMTArray;
-    pair: PPair;
   begin
     HAMTArray := PHAMTArray(hamtArrayx);
-    if pairIndex < 0 then begin
+    if append then begin
       result := THAMTArray.allocate(hamtArray.count + 1);
-      pairIndex := hamtArray.count;
-      pair := PHAMTArray(result)^[pairIndex];
-      TKeySizeEquivalent(pair.key) := TKeySizeEquivalent(key);
-      TInfo.addRef(pair.key);
-      TValueSizeEquivalent(pair.value) := default(TValueSizeEquivalent);
-    end else
+      PHAMTArray(result)^[hamtArray.count].init(key, value);
+    end else begin
       result := THAMTArray.allocate(hamtArray.count);
+    end;
     move(hamtArray^[0]^, PHAMTArray(result)^[0]^, hamtArray.count * sizeof(TPair));
     if hamtArray.refCount > 1 then begin
       hamtArray.incrementChildrenRefCount();
@@ -773,9 +789,7 @@ var
           pair := node.getPairFromOffset(1 - dataOffset);
           PPairSizeEquivalent(pair)^ := PPairSizeEquivalent(pairs)^;
         end;
-        pair := node.getPairFromOffset(dataOffset);
-        assignKeyRef(pair.key, key);
-        assignValueRef(pair.value, value);
+        node.getPairFromOffset(dataOffset).init(key, value);
         ppnode^ := node;
         exit;
       end;
@@ -824,10 +838,11 @@ begin
             if not allowOverride then exit;
           end;
           if (pairIndex < 0) or (hamtArray.refCount > 1) then begin
-            hamtArray := cloneArray(hamtArray);
+            hamtArray := cloneArrayAppend(hamtArray, pairIndex < 0);
             node.pointers[offset].setToArray(hamtArray);
           end;
-          assignValueRef(hamtArray^[pairIndex].value, value);
+          if pairIndex >= 0 then
+            assignValueRef(hamtArray^[pairIndex].value, value);
         end;
         exit;
       end else begin
@@ -860,9 +875,7 @@ begin
         if result then begin
           hamtArray := THAMTArray.allocate(2);
           PPairSizeEquivalent(hamtArray^[0])^ := PPairSizeEquivalent(pair)^;
-          TKeySizeEquivalent(hamtArray^[1].key) := TKeySizeEquivalent(key);
-          TValueSizeEquivalent(hamtArray^[1].value) := TValueSizeEquivalent(value);
-          hamtArray^[1].addRef();
+          hamtArray^[1].init(key, value);
           ppnode^.pointers[offset].setToArray(hamtArray);
         end else result := true;
         decrementRefCountButKeepChildren(node);
@@ -877,11 +890,10 @@ begin
       //copy node and add key+value pair
       offset := node.getPairOffset(index);
       ppnode^ := allocate(node.pointerCount, node.pairCount + 1);
-      move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * SizeUInt(node.pointerCount) + sizeof(TPair) * offset);
-      move( node.getPairFromOffset(offset)^ , ppnode^.getPairFromOffset(offset+1)^ , (node.pairCount - offset) * sizeof(TPair) );
       pair := ppnode^.getPairFromOffset(offset);
-      assignKeyRef(pair.key, key);
-      assignValueRef(pair.value, value);
+      pair.init(key, value);
+      move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * SizeUInt(node.pointerCount) + sizeof(TPair) * offset);
+      move( node.getPairFromOffset(offset)^ , (pair + 1)^ , (node.pairCount - offset) * sizeof(TPair) );
       decrementRefCountButKeepChildren(node);
       ppnode^.bitmapIsValue.bits[index] := true;
       exit;
@@ -921,7 +933,7 @@ var
 
     if level < 0 then begin
       THAMTNode.decrementRefCount(initialPPNode^);
-      initialPPNode^ := THAMTNode.allocate(0,0);
+      initialPPNode^ := THAMTNode.allocateEmpty;
       exit;
     end;
 
@@ -1131,7 +1143,7 @@ end;
 
 constructor TMutableMap.Create;
 begin
-  froot := THAMTNode.allocate(0,0);
+  froot := THAMTNode.allocateEmpty;
   fcount := 0;
 end;
 
@@ -1157,7 +1169,7 @@ end;
 procedure TMutableMap.clear;
 begin
   THAMTNode.decrementRefCount(froot);
-  froot := THAMTNode.allocate(0,0);
+  froot := THAMTNode.allocateEmpty;
   fcount := 0;
 end;
 
@@ -1172,7 +1184,7 @@ end;
 
 constructor TImmutableMap.Create;
 begin
-  froot := THAMTNode.allocate(0,0);
+  froot := THAMTNode.allocateEmpty;
   fcount := 0;
 end;
 
