@@ -98,13 +98,15 @@ type
     THAMTArray = packed object
       refCount: Integer;
       count: integer;
-      data: array[0..$FFFFFFFF] of TPair;
+      firstPair: array[0..0] of TPair;
       class function size(aCount: integer): SizeInt; static; inline;
       class function allocate(acount: integer): PHAMTArray; static;
       class procedure decrementRefCount(a: PHAMTArray); static;
       procedure incrementChildrenRefCount;
       function indexOf(const key: TKey): integer;
       function find(const key: TKey): PPair;
+      function get(i: Integer): PPair; inline;
+      property pairs[i: Integer]: PPair read get; default;
       //todo: this can easily be extended to a multi map, by having multiple pairs with the same key
     end;
     PHAMTNode = ^THAMTNode;
@@ -394,8 +396,8 @@ begin
     if offsets[level] < node.pointerCount then begin
       p := node.pointers[offsets[level]].unpack(isArray);
       if isArray then begin
-        fcurrent := @PHAMTArray(p).data[0];
-        pairLast := @PHAMTArray(p).data[PHAMTArray(p).count - 1];
+        fcurrent := @PHAMTArray(p).firstPair[0];
+        pairLast := fcurrent + PHAMTArray(p).count - 1;
         assert(fcurrent <= pairLast);
         exit(true);
       end;
@@ -530,11 +532,13 @@ end;
 class procedure THAMTNode.THAMTArray.decrementRefCount(a: PHAMTArray);
 var
   i: Integer;
+  p: PPair;
 begin
   with a^ do begin
+    p := @firstPair[0]; //use p[i] rather than pairs[i], because pairs[i] is not inlined
     if InterLockedDecrement(refCount) = 0 then begin
       for i := 0 to count - 1 do
-        data[i].release();
+        p[i].release();
       Freemem(a);
     end;
   end;
@@ -543,17 +547,21 @@ end;
 procedure THAMTNode.THAMTArray.incrementChildrenRefCount;
 var
   i: Integer;
+  p: PPair;
 begin
+  p := @firstPair[0];
   for i := 0 to count - 1 do
-    data[i].addRef();
+    p[i].addRef();
 end;
 
 function THAMTNode.THAMTArray.indexOf(const key: TKey): integer;
 var
   i: Integer;
+  p: PPair;
 begin
+  p := @firstPair[0];
   for i := 0 to count - 1 do
-    if TInfo.equal(data[i].key, key) then begin
+    if TInfo.equal(p[i].key, key) then begin
       exit(i);
     end;
   result := -1;
@@ -564,8 +572,16 @@ var
   index: Integer;
 begin
   index := indexOf(key);
-  if index >= 0 then result := @data[index]
-  else result := nil;
+  if index >= 0 then begin
+    result :=  @firstPair[0];
+    inc(result, index);
+  end else result := nil;
+end;
+
+function THAMTNode.THAMTArray.get(i: Integer): PPair;
+begin
+  result := @firstPair[0];
+  inc(result, i);
 end;
 
 {$push}
@@ -731,13 +747,13 @@ var pairIndex: Integer;
     if pairIndex < 0 then begin
       result := THAMTArray.allocate(hamtArray.count + 1);
       pairIndex := hamtArray.count;
-      pair := @PHAMTArray(result).data[pairIndex];
+      pair := PHAMTArray(result)^[pairIndex];
       TKeySizeEquivalent(pair.key) := TKeySizeEquivalent(key);
       TInfo.addRef(pair.key);
       TValueSizeEquivalent(pair.value) := default(TValueSizeEquivalent);
     end else
       result := THAMTArray.allocate(hamtArray.count);
-    move(hamtArray.data[0], PHAMTArray(result).data[0], hamtArray.count * sizeof(TPair));
+    move(hamtArray^[0]^, PHAMTArray(result)^[0]^, hamtArray.count * sizeof(TPair));
     if hamtArray.refCount > 1 then begin
       hamtArray.incrementChildrenRefCount();
       THAMTArray.decrementRefCount(hamtArray);
@@ -814,7 +830,7 @@ begin
       rawPointer := node.pointers[offset].unpack(pointerIsArray);
       if pointerIsArray then begin
         hamtArray := PHAMTArray(rawPointer);
-        h2 := TInfo.hash(hamtArray.data[0].key) shr (BITS_PER_LEVEL * i + BITS_PER_LEVEL);
+        h2 := TInfo.hash(hamtArray^[0].key) shr (BITS_PER_LEVEL * i + BITS_PER_LEVEL);
         if h <> h2 then begin
           //child at index is an array where the keys have a different hash
           //=> move array to a lower level on which the array hash and new key hash end up at a different index
@@ -837,7 +853,7 @@ begin
             hamtArray := cloneArray(hamtArray);
             node.pointers[offset].setToArray(hamtArray);
           end;
-          assignValueRef(hamtArray.data[pairIndex].value, value);
+          assignValueRef(hamtArray^[pairIndex].value, value);
         end;
         exit;
       end else begin
@@ -869,10 +885,10 @@ begin
           end;
         end;
         hamtArray := THAMTArray.allocate(2);
-        PPairSizeEquivalent(@hamtArray.data[0])^ := PPairSizeEquivalent(pair)^;
-        TKeySizeEquivalent(hamtArray.data[1].key) := TKeySizeEquivalent(key);
-        TValueSizeEquivalent(hamtArray.data[1].value) := TValueSizeEquivalent(value);
-        hamtArray.data[1].addRef();
+        PPairSizeEquivalent(hamtArray^[0])^ := PPairSizeEquivalent(pair)^;
+        TKeySizeEquivalent(hamtArray^[1].key) := TKeySizeEquivalent(key);
+        TValueSizeEquivalent(hamtArray^[1].value) := TValueSizeEquivalent(value);
+        hamtArray^[1].addRef();
         ppnode^.pointers[offset].setToArray(hamtArray);
         decrementRefCount(node);
       end else begin
@@ -1004,13 +1020,13 @@ begin
         //todo: optimize special case hamtArray.count = 2 by converting array to in-node value
         node := uniqueAncestorNodes(i);
         newHamtArray := THAMTArray.allocate(hamtArray.count - 1);
-        move(hamtArray.data[0], newHamtArray.data[0], sizeof(TPair) * pairIndex );
-        move(hamtArray.data[pairIndex + 1], newHamtArray.data[pairIndex], sizeof(TPair) * ( hamtArray.count - pairIndex - 1 ) );
+        move(hamtArray^[0]^, newHamtArray^[0]^, sizeof(TPair) * pairIndex );
+        move(hamtArray^[pairIndex + 1]^, newHamtArray^[pairIndex]^, sizeof(TPair) * ( hamtArray.count - pairIndex - 1 ) );
         if hamtArray.refCount > 1 then begin
           newHamtArray.incrementChildrenRefCount;
           THAMTArray.decrementRefCount(hamtArray);
         end else begin
-          hamtArray.data[pairIndex].release();
+          hamtArray^[pairIndex].release();
           Freemem(hamtArray);
         end;
         node.pointers[offset].setToArray(newHamtArray);
