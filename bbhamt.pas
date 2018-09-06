@@ -86,10 +86,12 @@ type
     TPair = packed record
       key: TKey;
       value: TValue;
+      procedure addRef(); inline;
+      procedure release(); inline;
     end;
     PPair = ^TPair;
     {Invariants:
-    - THAMTArray is not empty
+    - THAMTArray is not empty, count > 0
     - All keys in one THAMTArray have the same hash
     }
     PHAMTArray = ^THAMTArray;
@@ -103,6 +105,7 @@ type
       procedure incrementChildrenRefCount;
       function indexOf(const key: TKey): integer;
       function find(const key: TKey): PPair;
+      //todo: this can easily be extended to a multi map, by having multiple pairs with the same key
     end;
     PHAMTNode = ^THAMTNode;
     PPHAMTNode = ^PHAMTNode;
@@ -118,6 +121,12 @@ type
       property current: PPair read fcurrent;
       function MoveNext: boolean;
     end;
+    TKeySizeEquivalent = packed array[1..sizeof(TKey)] of byte;
+    TValueSizeEquivalent = packed array[1..sizeof(TValue)] of byte;
+    TPairSizeEquivalent = packed array[1..sizeof(TKey)+sizeof(TValue)] of byte;
+//    PKeySizeEquivalent = ^TKeySizeEquivalent;
+//    PValueSizeEquivalent = ^TValueSizeEquivalent;
+    PPairSizeEquivalent = ^TPairSizeEquivalent;
 
   protected
     refCount: Integer;
@@ -135,6 +144,8 @@ type
     class procedure hashShift(var hash: THAMTHash; out index: THAMTHash); static; inline;
     class function size(apointerCount, apairCount: integer): SizeInt; static; inline;
     procedure incrementChildrenRefCount;
+    class procedure assignKeyRef(var target: TKey; const source: TKey); static; inline;
+    class procedure assignValueRef(var target: TValue; const source: TValue); static; inline;
   public
     class procedure decrementRefCount(node: PHAMTNode); static;
     class function allocate(apointerCount, apairCount: integer): PHAMTNode; static;
@@ -158,9 +169,9 @@ type
   end;
 
 
-  //** @abstract(Default hash function and reference counting for string/TObject)
+  //** @abstract(Default hash function and reference counting for strings/objects)
   //** The HAMT requires a hash function (hash) and equality test (equal) to compare keys. @br
-  //** Memory management requires methods for reference counting (addRef, release) and copying (assignRef, assignNoRef). Reference counting is mandatory as the HAMT might make arbitrary many copies of everything. @br
+  //** Memory management requires methods for reference counting (addRef, release) . Reference counting is mandatory as the HAMT might make arbitrary many copies of everything. @br
   //** You can derive an object of THAMTTypeInfo to change some methods, e.g., the hashing.
   THAMTTypeInfo = object
     class function hash(const s: string): THAMTHash;
@@ -168,17 +179,14 @@ type
 
     class procedure addRef(var k: string); inline;
     class procedure release(var k: string); inline;
-    //** target := source with reference counting
-    class procedure assignRef(var target: string; const source: string); inline;
-    //** assignment without reference counting
-    class procedure assignNoRef(var target: string; const source: string); inline;
     class function toString(const k: string): string; inline;
+
+    class procedure addRef(var k: IUnknown); inline;
+    class procedure release(var k: IUnknown); inline;
 
     //no reference counting for objects
     class procedure addRef(var {%H-}k: TObject); inline;
     class procedure release(var {%H-}k: TObject); inline;
-    class procedure assignRef(var target: TObject; const source: TObject); inline;
-    class procedure assignNoRef(var target: TObject; const source: TObject); inline;
     class function toString(const k: TObject): string; inline;
   end;
 
@@ -333,6 +341,18 @@ type
 
 implementation
 
+procedure THAMTNode.TPair.addRef();
+begin
+  TInfo.addRef(key);
+  TInfo.addRef(value);
+end;
+
+procedure THAMTNode.TPair.release();
+begin
+  TInfo.release(key);
+  TInfo.release(value);
+end;
+
 
 function THAMTNode.THAMTEnumerator.pushNode(node: PHAMTNode): boolean;
 begin
@@ -386,17 +406,6 @@ begin
 
   result := false;
 end;
-
-  {
-
-  result := currentPairIndex < node.pairCount;
-  if result then begin
-    current := node.getPairFromOffset(currentPairIndex);
-    inc(currentPairIndex);
-  end;
-  if
-end;
-                  }
 
 
 {$PUSH}
@@ -458,19 +467,20 @@ begin
   fpc_ansistr_decr_ref(pointer(k));
 end;
 
-class procedure THAMTTypeInfo.assignRef(var target: string; const source: string);
-begin
-  target := source;
-end;
-
-class procedure THAMTTypeInfo.assignNoRef(var target: string; const source: string);
-begin
-  pointer(target) := pointer(source);
-end;
 
 class function THAMTTypeInfo.toString(const k: string): string;
 begin
   result := k
+end;
+
+class procedure THAMTTypeInfo.addRef(var k: IUnknown);
+begin
+  k._AddRef;
+end;
+
+class procedure THAMTTypeInfo.release(var k: IUnknown);
+begin
+  k._Release;
 end;
 
 class procedure THAMTTypeInfo.addRef(var k: TObject);
@@ -483,15 +493,6 @@ begin
   //empty
 end;
 
-class procedure THAMTTypeInfo.assignRef(var target: TObject; const source: TObject);
-begin
-  target := source;
-end;
-
-class procedure THAMTTypeInfo.assignNoRef(var target: TObject; const source: TObject);
-begin
-  target := source;
-end;
 
 class function THAMTTypeInfo.toString(const k: TObject): string;
 begin
@@ -532,10 +533,8 @@ var
 begin
   with a^ do begin
     if InterLockedDecrement(refCount) = 0 then begin
-      for i := 0 to count - 1 do begin
-        TInfo.release(data[i].key);
-        TInfo.release(data[i].value);
-      end;
+      for i := 0 to count - 1 do
+        data[i].release();
       Freemem(a);
     end;
   end;
@@ -545,10 +544,8 @@ procedure THAMTNode.THAMTArray.incrementChildrenRefCount;
 var
   i: Integer;
 begin
-  for i := 0 to count - 1 do begin
-    TInfo.addRef(data[i].key);
-    TInfo.addRef(data[i].value);
-  end;
+  for i := 0 to count - 1 do
+    data[i].addRef();
 end;
 
 function THAMTNode.THAMTArray.indexOf(const key: TKey): integer;
@@ -643,10 +640,22 @@ begin
     else InterLockedIncrement(PHAMTNode(pointerRaw).refCount)
   end;
   pairs := PPair(@pointers[pointerCount]);
-  for i := 0 to pairCount - 1 do begin
-    tinfo.addRef(pairs[i].key);
-    tinfo.addRef(pairs[i].value);
-  end;
+  for i := 0 to pairCount - 1 do
+    pairs[i].addRef();
+end;
+
+class procedure THAMTNode.assignKeyRef(var target: TKey; const source: TKey);
+begin
+  TInfo.release(target);
+  TKeySizeEquivalent(target) := TKeySizeEquivalent(source);
+  TInfo.addRef(target);
+end;
+
+class procedure THAMTNode.assignValueRef(var target: TValue; const source: TValue);
+begin
+  TInfo.release(target);
+  TValueSizeEquivalent(target) := TValueSizeEquivalent(source);
+  TInfo.addRef(target);
 end;
 
 class procedure THAMTNode.decrementRefCount(node: PHAMTNode);
@@ -664,10 +673,8 @@ begin
         else decrementRefCount(PHAMTNode(pointerRaw))
       end;
       pairs := PPair(@pointers[pointerCount]);
-      for i := 0 to pairCount - 1 do begin
-        tinfo.release(pairs[i].key);
-        tinfo.release(pairs[i].value);
-      end;
+      for i := 0 to pairCount - 1 do
+        pairs[i].release();
       Freemem(node);
     end;
   end;
@@ -725,9 +732,9 @@ var pairIndex: Integer;
       result := THAMTArray.allocate(hamtArray.count + 1);
       pairIndex := hamtArray.count;
       pair := @PHAMTArray(result).data[pairIndex];
-      TInfo.assignNoRef(pair.key, key);
+      TKeySizeEquivalent(pair.key) := TKeySizeEquivalent(key);
       TInfo.addRef(pair.key);
-      TInfo.assignNoRef(pair.value, Default(TValue));
+      TValueSizeEquivalent(pair.value) := default(TValueSizeEquivalent);
     end else
       result := THAMTArray.allocate(hamtArray.count);
     move(hamtArray.data[0], PHAMTArray(result).data[0], hamtArray.count * sizeof(TPair));
@@ -773,14 +780,12 @@ var
           node.bitmapIsValue.all := (THAMTHash(1) shl index) or (THAMTHash(1) shl index2);
           if index < index2 then dataOffset := 0 else dataOffset := 1;
           pair := node.getPairFromOffset(1 - dataOffset);
-          TInfo.assignNoRef(pair^.key, PPair(pairs).key);
-          TInfo.assignNoRef(pair^.value, PPair(pairs).value);
-          TInfo.addRef(pair^.key);
-          TInfo.addRef(pair^.value);
+          PPairSizeEquivalent(pair)^ := PPairSizeEquivalent(pairs)^;
+          pair.addRef();
         end;
         pair := node.getPairFromOffset(dataOffset);
-        TInfo.assignRef(pair.key, key);
-        TInfo.assignRef(pair.value, value);
+        assignKeyRef(pair.key, key);
+        assignValueRef(pair.value, value);
         ppnode^ := node;
         exit;
       end;
@@ -832,7 +837,7 @@ begin
             hamtArray := cloneArray(hamtArray);
             node.pointers[offset].setToArray(hamtArray);
           end;
-          TInfo.assignRef(hamtArray.data[pairIndex].value, value);
+          assignValueRef(hamtArray.data[pairIndex].value, value);
         end;
         exit;
       end else begin
@@ -864,18 +869,17 @@ begin
           end;
         end;
         hamtArray := THAMTArray.allocate(2);
-        fillchar(hamtArray.data[0], sizeof(TPair) * 2, 0);
-        TInfo.assignNoRef(hamtArray.data[0].key, pair.key);
-        TInfo.assignNoRef(hamtArray.data[0].value, pair.value);
-        TInfo.assignRef(hamtArray.data[1].key, key);
-        TInfo.assignRef(hamtArray.data[1].value, value);
+        PPairSizeEquivalent(@hamtArray.data[0])^ := PPairSizeEquivalent(pair)^;
+        TKeySizeEquivalent(hamtArray.data[1].key) := TKeySizeEquivalent(key);
+        TValueSizeEquivalent(hamtArray.data[1].value) := TValueSizeEquivalent(value);
+        hamtArray.data[1].addRef();
         ppnode^.pointers[offset].setToArray(hamtArray);
         decrementRefCount(node);
       end else begin
         result := false;
         if not allowOverride then exit;
         node := UniqueNode(ppnode);
-        TInfo.assignRef(node.getPairFromOffset(pairOffset).value, value);
+        assignValueRef(node.getPairFromOffset(pairOffset).value, value);
       end;
       exit;
     end else begin
@@ -885,8 +889,8 @@ begin
       move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, sizeof(THAMTBitmap) + sizeof(THAMTBitmap) + sizeof(Pointer) * node.pointerCount + sizeof(TPair) * offset);
       move( node.getPairFromOffset(offset)^ , ppnode^.getPairFromOffset(offset+1)^ , (node.pairCount - offset) * sizeof(TPair) );
       pair := ppnode^.getPairFromOffset(offset);
-      TInfo.assignRef(pair.key, key);
-      TInfo.assignRef(pair.value, value);
+      assignKeyRef(pair.key, key);
+      assignValueRef(pair.value, value);
       if node.refCount > 1 then begin
         node.incrementChildrenRefCount;
         decrementRefCount(node)
@@ -1006,10 +1010,7 @@ begin
           newHamtArray.incrementChildrenRefCount;
           THAMTArray.decrementRefCount(hamtArray);
         end else begin
-          with hamtArray.data[pairIndex] do begin
-            tinfo.release(key);
-            tinfo.release(value);
-          end;
+          hamtArray.data[pairIndex].release();
           Freemem(hamtArray);
         end;
         node.pointers[offset].setToArray(newHamtArray);
@@ -1043,10 +1044,7 @@ begin
           ppnode^.incrementChildrenRefCount;
           THAMTNode.decrementRefCount(node);
         end else begin
-          with node^.getPairFromOffset(pairOffset)^ do begin
-            tinfo.release(key);
-            tinfo.release(value);
-          end;
+          node^.getPairFromOffset(pairOffset).release();
           Freemem(node);
         end;
         ppnode^.bitmapIsValue.bits[index] := False;
