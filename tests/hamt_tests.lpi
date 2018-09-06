@@ -51,19 +51,22 @@
       </SyntaxOptions>
     </Parsing>
     <CodeGeneration>
+      <SmartLinkUnit Value="True"/>
       <Checks>
         <IOChecks Value="True"/>
         <RangeChecks Value="True"/>
         <OverflowChecks Value="True"/>
-        <StackChecks Value="True"/>
       </Checks>
-      <VerifyObjMethodCallValidity Value="True"/>
+      <Optimizations>
+        <OptimizationLevel Value="4"/>
+      </Optimizations>
     </CodeGeneration>
     <Linking>
       <Debugging>
         <UseHeaptrc Value="True"/>
         <TrashVariables Value="True"/>
       </Debugging>
+      <LinkSmart Value="True"/>
     </Linking>
   </CompilerOptions>
   <Debugging>

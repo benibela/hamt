@@ -10,16 +10,59 @@ uses
   { you can add units after this };
 
 
+type THAMTTestTypeInfo = object(THAMTTypeInfo)
+  class function hash(const s: string): THAMTHash;
+end;
 
-type TMutableMap_Test = class(TMutableMapStringString) //object(specialize THAMT<string, string, THAMTTypeInfo>)
+type TMutableMap_Test = class(specialize TMutableMap<string, string, THAMTTestTypeInfo>)
   procedure testInsert(const k, v: string; override: boolean = false);
   procedure testGet(const k, v: string);
   procedure testRemove(const k: string; notthere: boolean = false);
   procedure testEnumeration(expectedCount: integer);
 end;
-
 const MISSING = 'MISSING';
 
+
+{$PUSH}
+{$RangeChecks OFF}
+{$OverflowChecks OFF}
+class function THAMTTestTypeInfo.hash(const s: string): THAMTHash;
+var
+  p, last: PByte;
+begin
+  if s = '' then exit(1);
+  p := pbyte(pointer(s));
+  last := p + length(s);
+  result := 0;
+
+  //testing cases
+  if p^ = ord('_') then begin
+    inc(p);
+    while p < last do begin
+      result := (result shl BITS_PER_LEVEL) or ((p^ - ord('0')) * 10 + (((p+1)^ - ord('0') )));
+      inc(p, 3);
+    end;
+    exit;
+  end;
+  if p^ = ord('$') then exit(StrToInt(s));
+  case s of
+  'test', 'collision+1', 'collision+2', 'collision+3': exit(hash('collision'));
+  end;
+
+  //actual hash
+  while p < last do begin
+    result := result + p^;
+    result := result + (result shl 10);
+    result := result xor (result shr 6);
+    inc(p);
+  end;
+
+
+  result := result + (result shl 3);
+  result := result xor (result shr 11);
+  result := result + (result shl 15);
+end;
+{$POP}
 
 
 procedure TMutableMap_Test.testInsert(const k, v: string; override: boolean);
@@ -126,6 +169,10 @@ begin
   hamt.testGet('abc', 'def');
   hamt.free;
 
+  Assert(THAMTTestTypeInfo.hash('test') = THAMTTestTypeInfo.hash('collision'));
+  Assert(THAMTTestTypeInfo.hash('_00') = 0);
+  Assert(THAMTTestTypeInfo.hash('_01_02') = 2 or 32);
+  Assert(THAMTTestTypeInfo.hash('$123') = $123);
 
   //test collisions
   hamt := TMutableMap_Test.create;
@@ -143,6 +190,7 @@ begin
   hamt.testRemove('test', true);
   hamt.testRemove('test!', true);
   hamt.free;
+
 
 
   hamt := TMutableMap_Test.create;
@@ -188,6 +236,31 @@ begin
   hamt.testGet('_02x01_00', 'x2');
   hamt.testGet('_03_02_00', 'x3');
   hamt.testEnumeration(3);
+  hamt.free;
+
+  //test some keys
+  hamt := TMutableMap_Test.create;
+  hamt.testInsert('$0', '0x0');
+  hamt.testInsert('$1', '0x1');
+  hamt.testInsert('$2', '0x2');
+  hamt.testInsert('$3', '0x3');
+  hamt.testInsert('$FFFFFFFF', '0xFFFFFFFF');
+  hamt.testInsert('$FFFFFFFE', '0xFFFFFFFE');
+  hamt.testInsert('$EFFFFFFF', '0xEFFFFFFF');
+  hamt.testInsert('$EFFFFFFE', '0xEFFFFFFE');
+  hamt.testInsert('$7FFFFFFE', '0x7FFFFFFE');
+  hamt.testInsert('$7FFFFFFF', '0x7FFFFFFF');
+  hamt.testInsert('$FFFFFFF0', '0xFFFFFFF0');
+  hamt.testInsert('$FFFFFFF1', '0xFFFFFFF1');
+  hamt.testInsert('$FFFFFFF2', '0xFFFFFFF2');
+  hamt.testInsert('$FFFFFFF3', '0xFFFFFFF3');
+  hamt.testInsert('$eFFFFFF0', '0xeFFFFFF0');
+  hamt.testInsert('$eFFFFFF1', '0xeFFFFFF1');
+  hamt.testInsert('$eFFFFFF2', '0xeFFFFFF2');
+  hamt.testInsert('$eFFFFFF3', '0xeFFFFFF3');
+  hamt.testInsert('$eFFFFFF7', '0xeFFFFFF7');
+  hamt.testInsert('$eFFFFFF8', '0xeFFFFFF8');
+  hamt.testEnumeration(20);
   hamt.free;
 
 
@@ -368,8 +441,6 @@ begin
   hamt.free;
   hamt2.free;
 
-
-
   //immutable interface
   imap := TImmutableMapStringString.Create;
   imap2 := testInsert(imap, 'a', 'x');
@@ -388,5 +459,7 @@ begin
   imap.Free;
   imap2.Free;
   imap3.Free;
+
+  writeln('ok');
 end.
 

@@ -411,45 +411,10 @@ begin
 end;
 
 
-{$PUSH}
-{$RangeChecks OFF}
-{$OverflowChecks OFF}
 class function THAMTTypeInfo.hash(const s: string): THAMTHash;
-var
-  p, last: PByte;
 begin
-  if s = '' then exit(1);
-  p := pbyte(pointer(s));
-  last := p + length(s);
-  result := 0;
-
-  //testing cases
-  case s of
-  'test', 'collision+1', 'collision+2', 'collision+3': exit(hash('collision'));
-  end;
-  if p^ = ord('_') then begin
-    inc(p);
-    while p < last do begin
-      result := (result shl BITS_PER_LEVEL) or ((p^ - ord('0')) * 10 + (((p+1)^ - ord('0') )));
-      inc(p, 3);
-    end;
-    exit;
-  end;
-
-  //actual hash
-  while p < last do begin
-    result := result + p^;
-    result := result + (result shl 10);
-    result := result xor (result shr 6);
-    inc(p);
-  end;
-
-
-  result := result + (result shl 3);
-  result := result xor (result shr 11);
-  result := result + (result shl 15);
+  result := objpas.hash(s);
 end;
-{$POP}
 
 class function THAMTTypeInfo.equal(const s,t:string): boolean;
 begin
