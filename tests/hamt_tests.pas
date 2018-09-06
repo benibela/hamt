@@ -6,7 +6,7 @@ uses
   {$IFDEF UNIX}{$IFDEF UseCThreads}
   cthreads,
   {$ENDIF}{$ENDIF}
-  Classes, bbhamt, commontestutils, sysutils, bbutils, strutils, contnrs
+  Classes, bbhamt, commontestutils, sysutils, bbutils, contnrs
   { you can add units after this };
 
 
@@ -39,7 +39,7 @@ begin
   if p^ = ord('_') then begin
     inc(p);
     while p < last do begin
-      result := (result shl BITS_PER_LEVEL) or ((p^ - ord('0')) * 10 + (((p+1)^ - ord('0') )));
+      result := (result shl BITS_PER_LEVEL) or THAMTHash((p^ - ord('0')) * 10 + (((p+1)^ - ord('0') )));
       inc(p, 3);
     end;
     exit;

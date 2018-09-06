@@ -845,7 +845,7 @@ begin
         //    [ ..head..   ..pointerPrefix..            ..pointerSuffix..    ..pairPrefix..   old pair    ..pairSuffix.. ]
         // -> [ ..head..   ..pointerPrefix.. ..newPointer ..pointerSuffix..  ..pairPrefix..             ..pairSuffix.. ]
         move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, sizeof(THAMTBitmap) + sizeof(THAMTBitmap) + sizeof(Pointer) * offset); //head, pointer prefix
-        move(node.pointers[offset], ppnode^.pointers[offset + 1], sizeof(pointer) * (node.pointerCount - offset) + sizeof(TPair) * pairOffset); //..pointerSuffix..    ..pairPrefix..
+        move(node.pointers[offset], ppnode^.pointers[offset + 1], sizeof(pointer) * SizeUInt(node.pointerCount - offset) + sizeof(TPair) * pairOffset); //..pointerSuffix..    ..pairPrefix..
         move(node.getPairFromOffset(pairOffset + 1)^ , ppnode^.getPairFromOffset(pairOffset)^, (node.pairCount - pairOffset - 1) * sizeof(TPair) ); //..pairSuffix..
         ppnode^.bitmapIsSinglePointer.bits[index] := true;
         ppnode^.bitmapIsValue.bits[index] := False;
@@ -877,7 +877,7 @@ begin
       //copy node and add key+value pair
       offset := node.getPairOffset(index);
       ppnode^ := allocate(node.pointerCount, node.pairCount + 1);
-      move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, sizeof(THAMTBitmap) + sizeof(THAMTBitmap) + sizeof(Pointer) * node.pointerCount + sizeof(TPair) * offset);
+      move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * SizeUInt(node.pointerCount) + sizeof(TPair) * offset);
       move( node.getPairFromOffset(offset)^ , ppnode^.getPairFromOffset(offset+1)^ , (node.pairCount - offset) * sizeof(TPair) );
       pair := ppnode^.getPairFromOffset(offset);
       assignKeyRef(pair.key, key);
@@ -1021,7 +1021,7 @@ begin
         ppnode^ := allocate(node.pointerCount, node.pairCount - 1);
         //    [ ..head..   ..pointers..    ..pairPrefix..   old pair    ..pairSuffix.. ]
         // -> [ ..head..   ..pointers....  ..pairPrefix..               ..pairSuffix.. ]
-        move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * node.pointerCount + sizeof(TPair) * pairOffset);
+        move(node.bitmapIsSinglePointer, ppnode^.bitmapIsSinglePointer, 2*sizeof(THAMTBitmap) + sizeof(Pointer) * SizeUInt(node.pointerCount) + sizeof(TPair) * pairOffset);
         move(node.getPairFromOffset(pairOffset + 1)^ , ppnode^.getPairFromOffset(pairOffset)^, (node.pairCount - pairOffset - 1) * sizeof(TPair) ); //..pairSuffix..
         if node.refCount > 1 then begin
           ppnode^.incrementChildrenRefCount;
