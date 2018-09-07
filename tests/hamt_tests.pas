@@ -3,9 +3,9 @@ program hamt_tests;
 {$mode objfpc}{$H+}{$ModeSwitch typehelpers}
 
 uses
-  {$IFDEF UNIX}{$IFDEF UseCThreads}
+  {$IFDEF UNIX}
   cthreads,
-  {$ENDIF}{$ENDIF}
+  {$ENDIF}
   Classes, bbhamt, commontestutils, sysutils, bbutils, contnrs
   { you can add units after this };
 
@@ -21,6 +21,13 @@ type TMutableMap_Test = class(specialize TMutableMap<string, string, THAMTTestTy
   procedure testEnumeration(expectedCount: integer);
 end;
 const MISSING = 'MISSING';
+
+type TTestThread = class(TThread)
+  id: string;
+  map: TMutableMapStringString;
+  constructor Create(aid: string; amap: TMutableMapStringString);
+  procedure Execute; override;
+end;
 
 
 {$PUSH}
@@ -146,10 +153,42 @@ begin
   visitedKeys.Free;
 end;
 
+constructor TTestThread.Create(aid: string; amap: TMutableMapStringString);
+begin
+  id := aid;
+  map := amap;
+  inherited Create(false);
+end;
+
+var runningThreads: integer;
+procedure TTestThread.Execute;
+var
+  i: Integer;
+begin
+  for i := 1 to 50000 do
+    map.insert(id + IntToStr(i), IntToStr(i) + id);
+  for i := 1 to 50000 do
+    test(map.get(id + IntToStr(i)), IntToStr(i) + id);
+  for i := 1 to 50000 do
+    test(map.get(IntToStr(i)), 'init' + IntToStr(i));
+  for i := 1 to 50000 do
+    map.remove(IntToStr(i));
+  for i := 1 to 50000 do
+    test(map.get(id + IntToStr(i)), IntToStr(i) + id);
+  for i := 1 to 50000 do
+    test(map.contains(IntToStr(i)) = false);
+
+  map.free;
+  InterLockedDecrement(runningThreads);
+end;
+
 
 var
   hamt, hamt2: TMutableMap_Test;
   imap, imap2, imap3, imap4: TImmutableMapStringString;
+  mss: TMutableMapStringString;
+  i: Integer;
+  threads: array[1..8] of TThread;
 begin
   hamt := TMutableMap_Test.create;
   hamt.testInsert('hello', 'world');
@@ -459,6 +498,17 @@ begin
   imap.Free;
   imap2.Free;
   imap3.Free;
+
+  mss := TMutableMapStringString.Create();
+  for i := 1 to 50000 do
+    mss.insert(IntToStr(i), 'init' + IntToStr(i));
+  runningThreads := 8;
+  for i := 1 to 8 do
+    threads[i] := TTestThread.Create('_'+IntToStr(i)+'_', mss.clone);
+  mss.free;
+
+  while runningThreads > 0 do sleep(100);
+  for i := 1 to 8 do threads[i].free;
 
   writeln('ok');
 end.
