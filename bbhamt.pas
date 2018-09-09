@@ -164,8 +164,8 @@ type
   //** Memory management requires methods for reference counting (addRef, release) . Reference counting is mandatory as the HAMT might make arbitrary many copies of everything. @br
   //** You can derive an object of THAMTTypeInfo to change some methods, e.g., the hashing.
   THAMTTypeInfo = object
-    class function hash(const s: string): THAMTHash; static;
-    class function equal(const s, t: string): boolean; static;
+    class function hash(const s: string): THAMTHash; static; inline;
+    class function equal(const s, t: string): boolean; static; inline;
 
     class procedure addRef(var k: string); inline; static;
     class procedure release(var k: string); inline; static;
@@ -178,6 +178,16 @@ type
     class procedure addRef(var {%H-}k: TObject); inline;
     class procedure release(var {%H-}k: TObject); inline;
     class function toString(const k: TObject): string; inline;
+  end;
+
+  generic THAMTPairInfo<TPair, TInfo> = record
+    class function hash(const p: TPair): THAMTHash; static; inline;
+    class function equal(const p, q: TPair): boolean; static; inline;
+
+    class procedure addRef(var p: TPair); static; inline;
+    class procedure release(var p: TPair); static; inline;
+
+    class procedure assignEqual(var p: TPair; const q: TPair); static; inline;
   end;
 
   //** @abstract(Generic read-only map)
@@ -195,15 +205,8 @@ type
       value: TValue;
     end;
     PPair = ^TPair;
-    type TPairInfo = record
-      class function hash(const p: TPair): THAMTHash; static; inline;
-      class function equal(const p, q: TPair): boolean; static; inline;
 
-      class procedure addRef(var p: TPair); static; inline;
-      class procedure release(var p: TPair); static; inline;
-
-      class procedure assignEqual(var p: TPair; const q: TPair); static; inline;
-    end;
+    TPairInfo = specialize THAMTPairInfo<TPair, TInfo>;
 
     THAMTNode = specialize THAMTNode<TPair, TPairInfo>;
     PHAMTNode = ^THAMTNode;
@@ -352,32 +355,38 @@ type
 
   function alignedGetMem(s: PtrUInt): pointer; inline;
 
+  //need this in interface, otherwise THAMTTypeInfo.addRef/release is not inlined
+  Procedure fpc_AnsiStr_Incr_Ref (S : Pointer); [external name 'FPC_ANSISTR_INCR_REF'];
+  Procedure fpc_ansistr_decr_ref (Var S : Pointer); [external name 'FPC_ANSISTR_DECR_REF'];
+
 
 implementation
 
-class function TReadOnlyMap.TPairInfo.hash(const p: TPair): THAMTHash;
+class function THAMTPairInfo.hash(const p: TPair): THAMTHash;
 begin
   result := TInfo.hash(p.key);
 end;
 
-class function TReadOnlyMap.TPairInfo.equal(const p, q: TPair): boolean;
+class function THAMTPairInfo.equal(const p, q: TPair): boolean;
 begin
   result := TInfo.equal(p.key, q.key);
 end;
 
-class procedure TReadOnlyMap.TPairInfo.addRef(var p: TPair);
+class procedure THAMTPairInfo.addRef(var p: TPair);
 begin
-  TInfo.addRef(p.key);
-  TInfo.addRef(p.value);
+  with p do begin
+    TInfo.addRef(key);
+    TInfo.addRef(value);
+  end;
 end;
 
-class procedure TReadOnlyMap.TPairInfo.release(var p: TPair);
+class procedure THAMTPairInfo.release(var p: TPair);
 begin
   TInfo.release(p.key);
   TInfo.release(p.value);
 end;
 
-class procedure TReadOnlyMap.TPairInfo.assignEqual(var p: TPair; const q: TPair);
+class procedure THAMTPairInfo.assignEqual(var p: TPair; const q: TPair);
 begin
   p.value := q.value;
 end;
@@ -446,9 +455,6 @@ class function THAMTTypeInfo.equal(const s,t:string): boolean;
 begin
   result := s = t;
 end;
-
-Procedure fpc_AnsiStr_Incr_Ref (S : Pointer); [external name 'FPC_ANSISTR_INCR_REF'];
-Procedure fpc_ansistr_decr_ref (Var S : Pointer); [external name 'FPC_ANSISTR_DECR_REF'];
 
 
 class procedure THAMTTypeInfo.addRef(var k: string);
