@@ -10,7 +10,7 @@ Everything is implemented using generics, so it can be used with all types.
 Examples
 ------------
 
-Mutable:
+Mutable Map:
 
 ```pascal
 var map: TMutableMapStringString;
@@ -33,7 +33,7 @@ begin
 end.
 ```
 
-Immutable:
+Immutable Map:
 
 
 ```pascal
@@ -63,10 +63,70 @@ begin
 end.
 ```
 
+Mutable Set:
+```pascal
+type TMutableSetString = specialize TMutableSet<string, THAMTTypeInfo>;
+var stringSet: TMutableSetString;
+    p: TMutableSetString.PItem;
+begin
+  stringSet := TMutableSetString.create;
+  stringSet.Insert('hello');
+  stringSet.insert('foo');
+
+  writeln(stringSet['hello']); // true
+  writeln(stringSet.contains('foo')); // true
+  writeln(stringSet.contains('abc')); // false
+
+  //enumerate all
+  for p in stringSet do
+    writeln(p^);
+
+  stringSet.free;
+end.
+```
+
+
+Immutable Set:
+
+```pascal
+type TImmutableSetString = specialize TImmutableSet<string, THAMTTypeInfo>;
+var set1, set2, set3: TImmutableSetString;
+  p: TImmutableSetString.PItem;
+begin
+  set1 := TImmutableSetString.create;
+  set2 := set1.Insert('hello');
+  set3 := set2.insert('foo');
+
+  writeln(set1.contains('hello')); // false
+  writeln(set1['foo']);            // false
+
+  writeln(set2.contains('hello')); // true
+  writeln(set2['foo']);            // false
+
+  writeln(set3.contains('hello')); // true
+  writeln(set3['foo']);            // true
+
+  //enumerate all
+  for p in set3 do
+    writeln(p^);
+
+  set1.free;
+  set2.free;
+  set3.free;
+end.
+```
+
+
 Documentation
 --------
 
-[Manual](https://www.benibela.de/documentation/hamt/bbhamt.html)
+Manual: 
+
+* [HAMT](https://www.benibela.de/documentation/hamt/bbhamt.html)
+
+* [Maps](https://www.benibela.de/documentation/hamt/bbhamt.maps.html)
+
+* [Sets](https://www.benibela.de/documentation/hamt/bbhamt.sets.html)
  
 References
 -------

@@ -6,7 +6,7 @@ uses
   {$IFDEF UNIX}
   cthreads,
   {$ENDIF}
-  Classes, bbhamt, commontestutils, sysutils, bbutils, contnrs
+  Classes, bbhamt.internals, commontestutils, sysutils, bbutils, contnrs, bbhamt.maps, bbhamt.sets
   { you can add units after this };
 
 
@@ -94,7 +94,7 @@ var c: integer;
 begin
   c := count;
   if notthere then
-    test(THAMTNode.removeIfThere(@froot, k) <> notthere, 'remove failed: ' + k)
+    test(THAMTNode.removeIfThere(@froot, PPair(@k)^) <> notthere, 'remove failed: ' + k)
    else remove(k);
 //    test( <> notthere, 'remove failed: ' + k);
   test(get(k, MISSING), MISSING);
@@ -182,6 +182,50 @@ begin
   InterLockedDecrement(runningThreads);
 end;
 
+procedure setTestsMutable;
+var stringSet: TMutableSetString;
+    p: TMutableSetString.PItem;
+begin
+  stringSet := TMutableSetString.create;
+  stringSet.Insert('hello');
+  stringSet.insert('foo');
+
+  test(stringSet['hello']);
+  test(stringSet.contains('foo'));
+  test(not stringSet.contains('abc'));
+
+  //enumerate all
+  for p in stringSet do
+    test((p^ = 'hello') or (p^ = 'foo'));
+
+  stringSet.free;
+end;
+
+procedure setTestsImmutable;
+var set1, set2, set3: TImmutableSetString;
+  p: TImmutableSetString.PItem;
+begin
+  set1 := TImmutableSetString.create;
+  set2 := set1.Insert('hello');
+  set3 := set2.insert('foo');
+
+  test(not set1.contains('hello'));
+  test(not set1['foo']);
+
+  test(set2.contains('hello'));
+  test(not set2['foo']);
+
+  test(set3.contains('hello'));
+  test(set3['foo']);
+
+  //enumerate all
+  for p in set3 do
+    test((p^ = 'hello') or (p^ = 'foo'));
+
+  set1.free;
+  set2.free;
+  set3.free;
+end;
 
 var
   hamt, hamt2: TMutableMap_Test;
@@ -498,6 +542,9 @@ begin
   imap.Free;
   imap2.Free;
   imap3.Free;
+
+  setTestsMutable;
+  setTestsImmutable;
 
   mss := TMutableMapStringString.Create();
   for i := 1 to 50000 do
