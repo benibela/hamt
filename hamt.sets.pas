@@ -39,17 +39,17 @@ Public specialized classes:
 
 
 }
-unit bbhamt.sets;
+unit hamt.sets;
 
 {$mode objfpc}{$H+}{$ModeSwitch autoderef}{$ModeSwitch advancedrecords}
 
 interface
 
 uses
-  sysutils, bbhamt.internals;
+  sysutils, hamt.internals;
 
 type
-THAMTTypeInfo = bbhamt.internals.THAMTTypeInfo;
+THAMTTypeInfo = hamt.internals.THAMTTypeInfo;
 
 //** @abstract(Generic read-only set)
 //**

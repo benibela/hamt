@@ -42,17 +42,17 @@ Public specialized classes:
 * TImmutableMapStringObject
 
 }
-unit bbhamt.maps;
+unit hamt.maps;
 
 {$mode objfpc}{$H+}{$ModeSwitch autoderef}{$ModeSwitch advancedrecords}
 
 interface
 
 uses
-  sysutils, bbhamt.internals;
+  sysutils, hamt.internals;
 
 type
-THAMTTypeInfo = bbhamt.internals.THAMTTypeInfo;
+THAMTTypeInfo = hamt.internals.THAMTTypeInfo;
 
 generic THAMTPairInfo<TKey, TValue, TInfo> = record
   type

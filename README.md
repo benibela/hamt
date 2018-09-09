@@ -122,11 +122,11 @@ Documentation
 
 Manual: 
 
-* [HAMT](https://www.benibela.de/documentation/hamt/bbhamt.html)
+* [HAMT](https://www.benibela.de/documentation/hamt/hamt.html)
 
-* [Maps](https://www.benibela.de/documentation/hamt/bbhamt.maps.html)
+* [Maps](https://www.benibela.de/documentation/hamt/hamt.maps.html)
 
-* [Sets](https://www.benibela.de/documentation/hamt/bbhamt.sets.html)
+* [Sets](https://www.benibela.de/documentation/hamt/hamt.sets.html)
  
 References
 -------

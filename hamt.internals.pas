@@ -25,7 +25,7 @@ exception statement from your version.
 
 
 }
-unit bbhamt.internals;
+unit hamt.internals;
 
 {$mode objfpc}{$H+}{$ModeSwitch autoderef}{$ModeSwitch advancedrecords}
 

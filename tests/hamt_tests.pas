@@ -6,7 +6,7 @@ uses
   {$IFDEF UNIX}
   cthreads,
   {$ENDIF}
-  Classes, bbhamt.internals, commontestutils, sysutils, bbutils, contnrs, bbhamt.maps, bbhamt.sets
+  Classes, hamt.internals, commontestutils, sysutils, bbutils, contnrs, hamt.maps, hamt.sets
   { you can add units after this };
 
 
