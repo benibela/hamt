@@ -57,7 +57,7 @@ const
   BITS_PER_LEVEL = 5;
   LEVEL_HIGH = ( sizeof(THAMTHash) * 8 ) div BITS_PER_LEVEL;
 type
-  EHAMTKeyNotFound = class(Exception);
+  EHAMTException = class(Exception);
   generic THAMTItemHelper<T> = record //can't be specialized in the THAMTNode interface https://bugs.freepascal.org/view.php?id=34232
     type
     TSizeEquivalent = packed array[1..sizeof(T)] of byte;
@@ -135,8 +135,8 @@ type
       result = true                  inserted, (no override)
       result = false                 not inserted
     }
-    class function insert(ppnode: PPHAMTNode; const item: TItem; allowOverride: boolean): Boolean; static;
-    class function removeIfThere(ppnode: PPHAMTNode; const item: TItem): Boolean; static;
+    class function include(ppnode: PPHAMTNode; const item: TItem; allowOverride: boolean): Boolean; static;
+    class function exclude(ppnode: PPHAMTNode; const item: TItem): Boolean; static;
     function find(const item: TItem): PItem;
     function contains(const item: TItem): boolean;
   end;
@@ -176,6 +176,7 @@ type
     protected
       fcount: SizeInt;
       froot: PHAMTNode;
+      class procedure raiseItemError(const message: string; const item: TItem);
     public
       //** Returns if the set is empty
       function isEmpty: boolean; inline;
@@ -203,6 +204,12 @@ type
   Procedure fpc_AnsiStr_Incr_Ref (S : Pointer); [external name 'FPC_ANSISTR_INCR_REF'];
   Procedure fpc_ansistr_decr_ref (Var S : Pointer); [external name 'FPC_ANSISTR_DECR_REF'];
 {$endif}
+
+  resourcestring
+    rsMissingItem = 'Missing item: %s';
+    rsDuplicateItem = 'Duplicate item: %s';
+    rsMissingKey = 'Missing key: %s';
+    rsDuplicateKey = 'Duplicate key: %s';
 
 implementation
 
@@ -568,7 +575,7 @@ begin
 end;
 
 
-class function THAMTNode.insert(ppnode: PPHAMTNode; const item: TItem; allowOverride: boolean): Boolean;
+class function THAMTNode.include(ppnode: PPHAMTNode; const item: TItem; allowOverride: boolean): Boolean;
 var itemHelper: specialize THAMTItemHelper<TItem>;
 
 var itemIndex: Integer;
@@ -745,7 +752,7 @@ begin
   end;
 end;
 
-class function THAMTNode.removeIfThere(ppnode: PPHAMTNode; const item: TItem): Boolean;
+class function THAMTNode.exclude(ppnode: PPHAMTNode; const item: TItem): Boolean;
 var
   initialPPNode: PPHAMTNode;
   indices:  array[0..LEVEL_HIGH] of THAMTHash;
@@ -934,6 +941,12 @@ end;
 
 
 
+class procedure TReadOnlyCustomSet.raiseItemError(const message: string; const item: TItem);
+var s: string;
+begin
+  s := TInfo.toString(item);
+  raise EHAMTException.Create(Format(message, [s]) );
+end;
 
 function TReadOnlyCustomSet.isEmpty: boolean;
 begin

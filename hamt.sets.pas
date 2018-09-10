@@ -53,11 +53,12 @@ THAMTTypeInfo = hamt.internals.THAMTTypeInfo;
 
 //** @abstract(Generic read-only set)
 //**
-//** The data in this set can be read, but there are no methods to modify it.
+//** The data in this set can be read, but there are no public methods to modify it.
 generic TReadOnlySet<TItem, TInfo> = class(specialize TReadOnlyCustomSet<TItem, TInfo>)
   type PItem = ^TItem;
   protected
-    class procedure raiseMissingItem(const item: TItem);
+    function forceInclude(const item: TItem; allowOverride: boolean): boolean; inline;
+    function forceExclude(const item: TItem): boolean; inline;
   public
     //** Returns if the set contains a certain item
     function contains(const item: TItem): boolean; inline;
@@ -102,7 +103,12 @@ public
   constructor Create(other: specialize TReadOnlyCustomSet<TItem, TInfo>);
   //** Inserts an item, if the set does not contain the item or allowOverride is true.
   //** @returns If the set did not contain item.
-  function insert(const item: TItem; allowOverride: boolean = true): boolean;
+  function include(const item: TItem; allowOverride: boolean = true): boolean; inline;
+  //** Removes an item,
+  //** @returns If the set did contain item.
+  function exclude(const item: TItem): boolean; inline;
+  //** Inserts an item, or raises an exception if the set already contains the item
+  procedure insert(const item: TItem); inline;
   //** Removes an item, or raises an exception if the set did not contain the item
   procedure remove(const item: TItem); inline;
   //** Removes everything from the set;
@@ -149,12 +155,20 @@ public
   constructor Create;
   //** Creates a set equal to other. No data is copied, till either set is modified (copy-on-write).
   constructor Create(other: specialize TReadOnlyCustomSet<TItem, TInfo>);
+
   //** Creates a new set containing item @code(item). If the set does not contain item or allowOverride is true, item is inserted, otherwise the value is unchanged.
   //** @returns The new set
-  function insert(const item: TItem; allowOverride: boolean = true): TImmutableSet;
-  //** Creates a new set without item, or raises an exception if the set did not contain item
+  function include(const item: TItem; allowOverride: boolean = true): TImmutableSet; inline;
+  //** Removes an item
+  //** @returns The new set without item
+  function exclude(const item: TItem): TImmutableSet; inline;
+  //** Inserts an item, or raises an exception if the set already contains the item
   //** @returns The new set
+  function insert(const item: TItem): TImmutableSet; inline;
+  //** Creates a new set without item, or raises an exception if the set did not contain item
+  //** @returns The new set without item
   function remove(const item: TItem): TImmutableSet; inline;
+
   //** Creates a new set equal to self. No data is copied, till either set is modified (copy-on-write).
   function clone: TImmutableSet;
 end;
@@ -170,10 +184,16 @@ TImmutableSetString = specialize TImmutableSet<string, THAMTTypeInfo>;
 implementation
 
 
-
-class procedure TReadOnlySet.raiseMissingItem(const item: TItem);
+function TReadOnlySet.forceInclude(const item: TItem; allowOverride: boolean): boolean;
 begin
-  raise EHAMTKeyNotFound.Create('Key not found: '+TInfo.toString(item));
+  result := THAMTNode.include(@froot, item, allowOverride);
+  if Result then Inc(fcount);
+end;
+
+function TReadOnlySet.forceExclude(const item: TItem): boolean;
+begin
+  result := THAMTNode.exclude(@froot, item);
+  if result then dec(fcount);
 end;
 
 
@@ -213,16 +233,24 @@ begin
   InterLockedIncrement(froot.refCount);
 end;
 
-function TMutableSet.insert(const item: TItem; allowOverride: boolean): boolean;
+function TMutableSet.include(const item: TItem; allowOverride: boolean): boolean;
 begin
-  result := THAMTNode.insert(@froot, item, allowOverride);
-  if Result then Inc(fcount);
+  result := forceInclude(item, allowOverride);
+end;
+
+function TMutableSet.exclude(const item: TItem): boolean;
+begin
+  result := forceExclude(item);
+end;
+
+procedure TMutableSet.insert(const item: TItem);
+begin
+  if not forceInclude(item, false) then raiseItemError(rsDuplicateItem, item);
 end;
 
 procedure TMutableSet.remove(const item: TItem);
 begin
-  if not THAMTNode.removeIfThere(@froot, item) then raiseMissingItem(item);
-  dec(fcount);
+  if not forceExclude(item) then raiseItemError(rsMissingItem, item);
 end;
 
 procedure TMutableSet.clear;
@@ -254,21 +282,34 @@ begin
   InterLockedIncrement(froot.refCount);
 end;
 
-function TImmutableSet.insert(const item: TItem; allowOverride: boolean): TImmutableSet;
+function TImmutableSet.include(const item: TItem; allowOverride: boolean): TImmutableSet;
 begin
   result := TImmutableSet.Create(self);
-  if THAMTNode.insert(@result.froot, item, allowOverride) then
-    Inc(result.fcount);
+  result.forceInclude(item, allowOverride);
+end;
+
+function TImmutableSet.exclude(const item: TItem): TImmutableSet;
+begin
+  result := TImmutableSet.Create(self);
+  result.forceExclude(item);
+end;
+
+function TImmutableSet.insert(const item: TItem): TImmutableSet;
+begin
+  result := TImmutableSet.Create(self);
+  if not result.forceInclude(item, false) then begin
+    result.free;
+    raiseItemError(rsDuplicateItem, item);
+  end;
 end;
 
 function TImmutableSet.remove(const item: TItem): TImmutableSet;
 begin
   result := TImmutableSet.Create(self);
-  if not THAMTNode.removeIfThere(@froot, item) then begin
+  if not result.forceExclude(item) then begin
     result.free;
-    raiseMissingItem(item);
+    raiseItemError(rsMissingItem, item);
   end;
-  dec(result.fcount);
 end;
 
 function TImmutableSet.clone: TImmutableSet;

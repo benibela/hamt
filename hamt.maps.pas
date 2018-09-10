@@ -68,11 +68,13 @@ generic THAMTPairInfo<TKey, TValue, TInfo> = record
   class procedure release(var p: TPair); static; inline;
 
   class procedure assignEqual(var p: TPair; const q: TPair); static; inline;
+
+  class function toString(const p: TPair): string; static; inline;
 end;
 
 //** @abstract(Generic read-only map)
 //**
-//** The data in this map can be read, but there are no methods to modify it.
+//** The data in this map can be read, but there are no public methods to modify it.
 generic TReadOnlyMap<TKey, TValue, TInfo> = class(specialize TReadOnlyCustomSet<specialize THAMTPairInfo<TKey, TValue, TInfo>.TPair, specialize THAMTPairInfo<TKey, TValue, TInfo>>)
   type
   PKey = ^TKey;
@@ -81,10 +83,11 @@ generic TReadOnlyMap<TKey, TValue, TInfo> = class(specialize TReadOnlyCustomSet<
   TValueSizeEquivalent = packed array[1..sizeof(TValue)] of byte;
   PPair = THAMTNode.PItem;
   private
-    function removeIfThere(const key: TKey): boolean; inline;
+    function forceInclude(const key: TKey; const value: TValue; allowOverride: boolean): boolean; inline;
+    function forceExclude(const key: TKey): boolean; inline;
   protected
-    class procedure raiseMissingKey(const key: TKey);
     function find(const key: TKey): PPair; inline;
+    class procedure raiseKeyError(const message: string; const key: TKey); static;
   public
     //** Creates an empty map
     constructor Create;
@@ -131,12 +134,17 @@ Example:
 #)
 }
 generic TMutableMap<TKey, TValue, TInfo> = class(specialize TReadOnlyMap<TKey, TValue, TInfo>)
-private
-  procedure insertItem(const key: TKey; const value: TValue);
+protected
+  procedure includeItem(const key: TKey; const value: TValue); inline;
 public
-  //** Inserts a (key, value) pair, if the map does not contain key or allowOverride is true.
-  //** @returns If the map did not contain key.
-  function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean;
+  //** Inserts a (key, value) pair, if allowOverride is true or key did not exist
+  //** @returns If the map did not contain key
+  function include(const key: TKey; const value: TValue; allowOverride: boolean = true): boolean; inline;
+  //** Removes a (key, value) pair
+  //** @returns If the map did contain key
+  function exclude(const key: TKey): boolean; inline;
+  //** Inserts a (key, value) pair, or raises an exception if the map did not contain key
+  procedure insert(const key: TKey; const value: TValue); inline;
   //** Removes key (and the associated value), or raises an exception if the map did not contain key
   procedure remove(const key:TKey); inline;
   //** Removes everything from the map;
@@ -144,7 +152,7 @@ public
   //** Creates a new map equal to self. No data is copied, till either map is modified (copy-on-write).
   function clone: TMutableMap;
   //** Default parameter, so you can read or write elements with @code(map[key])
-  property items[key: TKey]: TValue read get write insertItem; default;
+  property items[key: TKey]: TValue read get write includeItem; default;
 end;
 
 {** @abstract(Generic immutable map)
@@ -181,9 +189,15 @@ end.
 }
 generic TImmutableMap<TKey, TValue, TInfo> = class(specialize TReadOnlyMap<TKey, TValue, TInfo>)
 public
-  //** Creates a new map containing key @code(key). If the map does not contain key or allowOverride is true, the value associated with the key is @code(value), otherwise the value is unchanged.
+  //** Creates a new map containing (key, value). If the map does not contain key or allowOverride is true, the value associated with the key is @code(value), otherwise the value is unchanged.
   //** @returns The new map
-  function insert(const key: TKey; const value: TValue; allowOverride: boolean = true): TImmutableMap;
+  function include(const key: TKey; const value: TValue; allowOverride: boolean = true): TImmutableMap; inline; overload;
+  //** Creates a new map without key and its associated value
+  //** @returns The new map
+  function exclude(const key: TKey): TImmutableMap; inline;
+  //** Creates a new map containing (key, value), or raises an exception if the map already contained key
+  //** @returns The new map
+  function insert(const key: TKey; const value: TValue): TImmutableMap; inline;
   //** Creates a new map without key and its associated value, or raises an exception if the map did not contain key
   //** @returns The new map
   function remove(const key:TKey): TImmutableMap; inline;
@@ -207,6 +221,7 @@ TImmutableMapStringObject = specialize TImmutableMap<string, TObject, THAMTTypeI
 
 implementation
 
+
 class function THAMTPairInfo.hash(const p: TPair): THAMTHash;
 begin
   result := TInfo.hash(p.key);
@@ -227,13 +242,20 @@ end;
 
 class procedure THAMTPairInfo.release(var p: TPair);
 begin
-  TInfo.release(p.key);
-  TInfo.release(p.value);
+  with p do begin
+    TInfo.release(key);
+    TInfo.release(value);
+  end;
 end;
 
 class procedure THAMTPairInfo.assignEqual(var p: TPair; const q: TPair);
 begin
   p.value := q.value;
+end;
+
+class function THAMTPairInfo.toString(const p: TPair): string;
+begin
+  result := TInfo.toString(p.key);
 end;
 
 constructor TReadOnlyMap.Create;
@@ -249,21 +271,33 @@ begin
   InterLockedIncrement(froot.refCount);
 end;
 
-function TReadOnlyMap.removeIfThere(const key: TKey): boolean;
+function TReadOnlyMap.forceInclude(const key: TKey; const value: TValue; allowOverride: boolean): boolean;
+var tempPair: packed array[1..sizeof(TKey)+sizeof(TValue)] of byte;
 begin
-  result := THAMTNode.removeIfThere(@froot, PPair(@key)^ ); //this cast should work, because key is the first element of TPair
+  TKeySizeEquivalent(PPair(@tempPair).key) := TKeySizeEquivalent(key);
+  TValueSizeEquivalent(PPair(@tempPair).value) := TValueSizeEquivalent(value);
+  result := THAMTNode.include(@froot, PPair(@tempPair)^, allowOverride);
+  if result then inc(fcount);
 end;
 
-class procedure TReadOnlyMap.raiseMissingKey(const key: TKey);
+function TReadOnlyMap.forceExclude(const key: TKey): boolean;
 begin
-  raise EHAMTKeyNotFound.Create('Key not found: '+TInfo.toString(key));
+  result := THAMTNode.exclude(@froot, PPair(@key)^ ); //this cast should work, because key is the first element of TPair
+  if result then dec(fcount);
 end;
+
 
 function TReadOnlyMap.find(const key: TKey): PPair;
 begin
   result := froot.find( PPair(@key)^ ); //this cast should work, because key is the first element of TPair
 end;
 
+class procedure TReadOnlyMap.raiseKeyError(const message: string; const key: TKey);
+var s: string;
+begin
+  s := TInfo.toString(key);
+  raise EHAMTException.Create(Format(message, [s]) );
+end;
 
 function TReadOnlyMap.contains(const key: TKey): boolean;
 begin
@@ -284,29 +318,33 @@ var
   pair: PPair;
 begin
   pair := find(key);
-  if pair = nil then raiseMissingKey(key);
+  if pair = nil then
+    raiseKeyError(rsMissingKey, key);
   result := pair.value;
 end;
 
-procedure TMutableMap.insertItem(const key: TKey; const value: TValue);
+
+
+procedure TMutableMap.includeItem(const key: TKey; const value: TValue);
 begin
-  insert(key, value, true);
+  forceInclude(key, value, true);
 end;
 
-function TMutableMap.insert(const key: TKey; const value: TValue; allowOverride: boolean): boolean;
-var tempPair: packed array[1..sizeof(TKey)+sizeof(TValue)] of byte;
+function TMutableMap.include(const key: TKey; const value: TValue; allowOverride: boolean): boolean;
 begin
-  TKeySizeEquivalent(PPair(@tempPair).key) := TKeySizeEquivalent(key);
-  TValueSizeEquivalent(PPair(@tempPair).value) := TValueSizeEquivalent(value);
-
-  result := THAMTNode.insert(@froot, PPair(@tempPair)^, allowOverride);
-  if Result then Inc(fcount);
+  result := forceInclude(key, value, allowOverride);
 end;
-
-procedure TMutableMap.remove(const key: TKey);
+function TMutableMap.exclude(const key: TKey): boolean;
 begin
-  if not removeIfThere(key) then raiseMissingKey(key);
-  dec(fcount);
+  result := forceExclude(key);
+end;
+procedure TMutableMap.insert(const key: TKey; const value: TValue);
+begin
+  if not forceInclude(key, value, false) then raiseKeyError(rsDuplicateKey, key);
+end;
+procedure TMutableMap.remove(const key:TKey);
+begin
+  if not forceExclude(key) then raiseKeyError(rsMissingKey, key);
 end;
 
 procedure TMutableMap.clear;
@@ -323,29 +361,33 @@ begin
 end;
 
 
-
-
-
-function TImmutableMap.insert(const key: TKey; const value: TValue; allowOverride: boolean): TImmutableMap;
-var tempPair: packed array[1..sizeof(TKey)+sizeof(TValue)] of byte;
+function TImmutableMap.include(const key: TKey; const value: TValue; allowOverride: boolean): TImmutableMap; inline;
 begin
-  TKeySizeEquivalent(PPair(@tempPair).key) := TKeySizeEquivalent(key);
-  TValueSizeEquivalent(PPair(@tempPair).value) := TValueSizeEquivalent(value);
-
   result := TImmutableMap.Create(self);
-  if THAMTNode.insert(@result.froot, PPair(@tempPair)^, allowOverride) then
-    Inc(result.fcount);
+  result.forceInclude(key, value, allowOverride)
 end;
-
-function TImmutableMap.remove(const key: TKey): TImmutableMap;
+function TImmutableMap.exclude(const key: TKey): TImmutableMap; inline;
 begin
   result := TImmutableMap.Create(self);
-  if not result.removeIfThere(key) then begin
+  result.forceExclude(key);
+end;
+function TImmutableMap.insert(const key: TKey; const value: TValue): TImmutableMap; inline;
+begin
+  result := TImmutableMap.Create(self);
+  if not result.forceInclude(key, value, false) then begin
     result.free;
-    raiseMissingKey(key);
+    raiseKeyError(rsDuplicateKey, key);
   end;
-  dec(result.fcount);
 end;
+function TImmutableMap.remove(const key:TKey): TImmutableMap; inline;
+begin
+  result := TImmutableMap.Create(self);
+  if not result.forceExclude(key) then begin
+    result.free;
+    raiseKeyError(rsMissingKey, key);
+  end;
+end;
+
 
 function TImmutableMap.clone: TImmutableMap;
 begin

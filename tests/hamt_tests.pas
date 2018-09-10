@@ -76,7 +76,7 @@ procedure TMutableMap_Test.testInsert(const k, v: string; override: boolean);
 var c: integer;
 begin
   c := count;
-  test(insert(k, v) xor override, 'insert failed (override marker?)');
+  test(include(k, v) xor override, 'insert failed (override marker?)');
   test(contains(k), 'insert failed: ' + k);
   test(get(k, 'xx'), v);
   if not override then inc(c);
@@ -94,7 +94,7 @@ var c: integer;
 begin
   c := count;
   if notthere then
-    test(THAMTNode.removeIfThere(@froot, PPair(@k)^) <> notthere, 'remove failed: ' + k)
+    test(exclude(k) <> notthere, 'remove failed: ' + k)
    else remove(k);
 //    test( <> notthere, 'remove failed: ' + k);
   test(get(k, MISSING), MISSING);
@@ -124,7 +124,8 @@ function testInsert(m: TImmutableMapStringString; const k, v: string; override: 
 var c: integer;
 begin
   c := m.count;
-  result := m.insert(k, v);
+  if override then result := m.include(k, v)
+  else result := m.insert(k, v);
 //  test( xor override, 'insert failed (override marker?)');
   test(result.contains(k), 'insert failed: ' + k);
   test(result.get(k, 'xx'), v);
@@ -194,6 +195,18 @@ begin
   test(stringSet.contains('foo'));
   test(not stringSet.contains('abc'));
 
+  stringSet.include('foo');
+  stringSet.include('foobar');
+  test(stringSet.contains('foo'));
+  test(stringSet.contains('foobar'));
+
+  stringSet.remove('foo');
+  stringSet.remove('foobar');
+  //stringSet.remove('foobar');
+  stringSet.exclude('foo');
+  stringSet.exclude('foobar');
+  stringSet.exclude('foobar');
+
   //enumerate all
   for p in stringSet do
     test((p^ = 'hello') or (p^ = 'foo'));
@@ -202,7 +215,7 @@ begin
 end;
 
 procedure setTestsImmutable;
-var set1, set2, set3: TImmutableSetString;
+var set1, set2, set3, set4, set5: TImmutableSetString;
   p: TImmutableSetString.PItem;
 begin
   set1 := TImmutableSetString.create;
@@ -218,6 +231,15 @@ begin
   test(set3.contains('hello'));
   test(set3['foo']);
 
+  set4 := set3.remove('hello');
+  set5 := set4.exclude('hello');
+
+  test(not set4.contains('hello'));
+  test(set4['foo']);
+
+  test(not set5.contains('hello'));
+  test(set5['foo']);
+
   //enumerate all
   for p in set3 do
     test((p^ = 'hello') or (p^ = 'foo'));
@@ -225,6 +247,8 @@ begin
   set1.free;
   set2.free;
   set3.free;
+  set4.free;
+  set5.free;
 end;
 
 var
