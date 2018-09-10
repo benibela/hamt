@@ -32,15 +32,15 @@
         <IsPartOfProject Value="True"/>
       </Unit0>
       <Unit1>
-        <Filename Value="..\bbhamt.pas"/>
+        <Filename Value="..\hamt.internals.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit1>
       <Unit2>
-        <Filename Value="..\bbhamt.maps.pas"/>
+        <Filename Value="..\hamt.maps.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit2>
       <Unit3>
-        <Filename Value="..\bbhamt.sets.pas"/>
+        <Filename Value="..\hamt.sets.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit3>
     </Units>

@@ -1,9 +1,9 @@
 Hash Array Mapped Trie (HAMT)
 ============
 
-A HAMT is a hashmap stored as trie, which provides update and lookup performance similarly to a normal hashmap, but needs no rehashing and also allows one to copy the entire map in constant time.  This implementation uses a 32 bit hash and trie nodes with 32 children, so 5 bits of the hash are consumed to choose the next child. When there are no hash collisions, this HAMT can store 2^32 items with a maximal tree depth of (log_32 2^32) = 6, i.e., you need 6 memory accesses to find any key/value which is practically O(1). (When there are hash collisions, they are put in an array)
+A HAMT is a hashmap/set stored as trie, which provides update and lookup performance similarly to a normal hashmap/set, but needs no rehashing and also allows one to copy the entire map/set in constant time.  This implementation uses a 32 bit hash and trie nodes with 32 children, so 5 bits of the hash are consumed to choose the next child. When there are no hash collisions, this HAMT can store 2^32 items with a maximal tree depth of (log_32 2^32) = 6, i.e., you need 6 memory accesses to find any key/value which is practically O(1). Although when there are hash collisions, they are put in an array. 
 
-Each HAMT node carries a reference counter, since FreePascal has no garbage collector. If the reference count is 1, the node can mutate, otherwise it is immutable with a copy-on-write semantic like strings. The counter is updated atomically, so the map could be shared across threads. 
+Each HAMT node carries a reference counter, since FreePascal has no garbage collector. If the reference count is 1, the node can mutate, otherwise it is immutable with a copy-on-write semantic like strings. The counter is updated atomically, so the map could be shared across threads. This might lead to a large number of memory writes when a path of a full tree is copied (6 levels of up 32 children), but still less than copying a full hash table.
 
 Everything is implemented using generics, so it can be used with all types.
 
@@ -13,6 +13,7 @@ Examples
 Mutable Map:
 
 ```pascal
+type TMutableMapStringString = specialize TMutableMap<string, string, THAMTTypeInfo>;
 var map: TMutableMapStringString;
     p: TMutableMapStringString.PPair;
 begin
@@ -37,6 +38,7 @@ Immutable Map:
 
 
 ```pascal
+type TImmutableMapStringString = specialize TImmutableMap<string, string, THAMTTypeInfo>;
 var map, map2, map3: TImmutableMapStringString;
     p: TImmutableMapStringString.PPair;
 begin
@@ -122,11 +124,13 @@ Documentation
 
 Manual: 
 
-* [HAMT](https://www.benibela.de/documentation/hamt/hamt.html)
 
 * [Maps](https://www.benibela.de/documentation/hamt/hamt.maps.html)
 
 * [Sets](https://www.benibela.de/documentation/hamt/hamt.sets.html)
+
+* [HAMT](https://www.benibela.de/documentation/hamt/hamt.internals.html)
+
  
 References
 -------
