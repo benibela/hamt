@@ -207,6 +207,17 @@ begin
   stringSet.exclude('foobar');
   stringSet.exclude('foobar');
 
+  test(not stringSet.contains('foo'));
+  test(not stringSet.contains('foobar'));
+
+  stringSet['foo'] := true;
+  test(stringSet.contains('foo'));
+  stringSet['foo'] := false;
+  test(not stringSet.contains('foo'));
+  stringSet['foo'] := true;
+  test(stringSet.contains('foo'));
+
+
   //enumerate all
   for p in stringSet do
     test((p^ = 'hello') or (p^ = 'foo'));

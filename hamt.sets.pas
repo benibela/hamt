@@ -96,6 +96,8 @@ Example:
 #)
 }
 generic TMutableSet<TItem, TInfo> = class(specialize TReadOnlySet<TItem, TInfo>)
+private
+  procedure toggleItem(item: TItem; AValue: Boolean);
 public
   //** Creates an empty set
   constructor Create;
@@ -115,6 +117,8 @@ public
   procedure clear;
   //** Creates a new set equal to self. No data is copied, till either set is modified (copy-on-write).
   function clone: TMutableSet;
+  //** Default parameter, so you can test and update the set with @code(set[key])
+  property items[item: TItem]: Boolean read contains write toggleItem; default;
 end;
 
 {** @abstract(Generic immutable set)
@@ -219,6 +223,12 @@ begin
   if pair = nil then raiseMissingKey(key);
   result := pair.value;
 end;                  }
+
+procedure TMutableSet.toggleItem(item: TItem; AValue: Boolean);
+begin
+  if AValue then include(item, true)
+  else exclude(item);
+end;
 
 constructor TMutableSet.Create;
 begin
