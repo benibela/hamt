@@ -1,0 +1,38 @@
+language: generic
+sudo: required
+dist: trusty
+
+os:
+  - linux
+
+env:
+  matrix:
+    - FPC_VER=3.0.4
+
+install:
+  - if [[ $FPC_VER = 3.0.4 ]]; then wget http://mirrors.iwi.me/lazarus/releases/Lazarus%20Linux%20amd64%20DEB/Lazarus%201.8.0RC5/fpc_3.0.4-rc1_amd64.deb; sudo dpkg --force-overwrite -i *.deb; fi
+  - git clone https://github.com/benibela/bbutils.git bbutils
+
+script:
+  - fpc -Fubbutils tests/hamt_tests.pas
+  - tests/hamt_tests
+  - rm hamt*.o hamt*.ppu
+  - fpc -O2 -Fubbutils tests/hamt_tests.pas
+  - tests/hamt_tests
+  - rm hamt*.o hamt*.ppu
+  - fpc -O3 -Fubbutils tests/hamt_tests.pas
+  - tests/hamt_tests
+  - rm hamt*.o hamt*.ppu
+  - fpc -O4 -Fubbutils tests/hamt_tests.pas
+  - tests/hamt_tests
+  - rm hamt*.o hamt*.ppu
+  - fpc -CoRt -Fubbutils tests/hamt_tests.pas
+  - tests/hamt_tests
+  - rm hamt*.o hamt*.ppu
+  - fpc -CoRt -O4 -Fubbutils tests/hamt_tests.pas
+  - tests/hamt_tests
+
+notifications:
+  email:
+    on_success: false
+on_failure: change
