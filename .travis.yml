@@ -10,7 +10,7 @@ env:
     - FPC_VER=3.0.4
 
 install:
-  - if [[ $FPC_VER = 3.0.4 ]]; then wget http://mirrors.iwi.me/lazarus/releases/Lazarus%20Linux%20amd64%20DEB/Lazarus%201.8.0RC5/fpc_3.0.4-rc1_amd64.deb; sudo dpkg --force-overwrite -i *.deb; fi
+  - if [[ $FPC_VER = 3.0.4 ]]; then wget http://mirrors.iwi.me/lazarus/releases/Lazarus%20Linux%20amd64%20DEB/Lazarus%201.8.4/fpc_3.0.4-3_amd64.deb; sudo dpkg --force-overwrite -i *.deb; fi
   - git clone https://github.com/benibela/bbutils.git bbutils
 
 script:
