@@ -347,7 +347,7 @@ function THAMTBitmap.countBeforeIndex(index: THAMTHash): DWord; inline;
 var
   mask: THAMTHash;
 begin
-  mask := (THAMTHash(1) shl index) - 1;
+  mask := THAMTHash((THAMTHash(1) shl index) - 1);
   result := PopCnt(all and mask);
 end;
 
@@ -482,7 +482,7 @@ var
   pairs: PItem;
   i: Integer;
 begin
-  for i := 0 to pointerCount - 1 do begin
+  for i := 0 to integer(pointerCount) - 1 do begin
     pointerRaw := pointers[i].unpack(isArray);
     if isArray then InterLockedIncrement(PHAMTArray(pointerRaw).refCount)
     else InterLockedIncrement(PHAMTNode(pointerRaw).refCount)
