@@ -131,6 +131,15 @@ Manual:
 
 * [HAMT](https://www.benibela.de/documentation/hamt/hamt.internals.html)
 
+Installation
+---------
+This library requires no installation, there are no dependencies besides the FreePascal compiler. Just copy the `hamt.*` files in the unit search path of FreePascal.  Then you can use the maps with `uses hamt.maps` and the sets with `uses hamt.sets`.
+
+However, beware that the last stable release of FreePascal, 3.0.4, cannot compile the complex generics used here. You need to have at least FreePascal 3.1.1, preferably 3.3.1 with revision r39690.
+ 
+To run the tests cases in `tests/hamt_tests.pas`, you also need to have [bbutils](https://www.benibela.de/sources_en.html#bbutils) in the search path.
+ 
+
  
 References
 -------
