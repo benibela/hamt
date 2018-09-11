@@ -60,6 +60,7 @@ generic THAMTPairInfo<TKey, TValue, TInfo> = record
     key: TKey;
     value: TValue;
   end;
+  TValueSizeEquivalent = packed array[1..sizeof(TValue)] of byte;
 
   class function hash(const p: TPair): THAMTHash; static; inline;
   class function equal(const p, q: TPair): boolean; static; inline;
@@ -250,7 +251,9 @@ end;
 
 class procedure THAMTPairInfo.assignEqual(var p: TPair; const q: TPair);
 begin
-  p.value := q.value;
+  TInfo.release(p.value);
+  TValueSizeEquivalent(p.value) := TValueSizeEquivalent(q.value);
+  TInfo.addRef(p.value);
 end;
 
 class function THAMTPairInfo.toString(const p: TPair): string;
