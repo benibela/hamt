@@ -117,8 +117,8 @@ type
     function getItemAddr(index: THAMTHash): PItem; inline;
     function getNodeFromOffset(offset: DWord): PHAMTNode; inline;
     class procedure hashShift(var hash: THAMTHash; out index: THAMTHash); static; inline;
-    class function size(apointerCount, aitemCount: integer): SizeInt; static; inline;
-    class function allocate(apointerCount, aitemCount: integer): PHAMTNode; static; //memory not initialized besides counts
+    class function size(apointerCount, aitemCount: SizeInt): SizeInt; static; inline;
+    class function allocate(apointerCount, aitemCount: SizeInt): PHAMTNode; static; //memory not initialized besides counts
     procedure incrementChildrenRefCount;
   public
     class procedure decrementRefCount(node: PHAMTNode); static;
@@ -480,9 +480,9 @@ var
   isArray: boolean;
   pointerRaw: Pointer;
   pairs: PItem;
-  i: Integer;
+  i: SizeInt;
 begin
-  for i := 0 to integer(pointerCount) - 1 do begin
+  for i := 0 to SizeInt(pointerCount) - 1 do begin
     pointerRaw := pointers[i].unpack(isArray);
     if isArray then InterLockedIncrement(PHAMTArray(pointerRaw).refCount)
     else InterLockedIncrement(PHAMTNode(pointerRaw).refCount)
@@ -498,7 +498,7 @@ var
   isArray: boolean;
   pointerRaw: Pointer;
   pairs: PItem;
-  i: Integer;
+  i: SizeInt;
 begin
   with node^ do begin
     if InterLockedDecrement(refCount) = 0 then begin
@@ -524,14 +524,14 @@ begin
   end;
 end;
 
-class function THAMTNode.size(apointerCount, aitemCount: integer): SizeInt;
+class function THAMTNode.size(apointerCount, aitemCount: SizeInt): SizeInt;
 begin
   size := SizeOf(THAMTNode.refCount) + SizeOf(THAMTNode.pointerCount) + SizeOf(THAMTNode.itemCount) + SizeOf(THAMTNode.bitmapIsSinglePointer) + SizeOf(THAMTNode.bitmapIsValue)
                    + SizeOf(Pointer) * apointerCount
                    + SizeOf(TItem) * aitemCount;
 end;
 
-class function THAMTNode.allocate(apointerCount, aitemCount: integer): PHAMTNode;
+class function THAMTNode.allocate(apointerCount, aitemCount: SizeInt): PHAMTNode;
 var
   s: SizeInt;
 begin
@@ -544,7 +544,7 @@ end;
 
 class function THAMTNode.allocateEmpty(): PHAMTNode;
 const
-  s: SizeInt = SizeOf(THAMTNode.refCount) + SizeOf(THAMTNode.pointerCount) + SizeOf(THAMTNode.itemCount) + SizeOf(THAMTNode.bitmapIsSinglePointer) + SizeOf(THAMTNode.bitmapIsValue);
+  s: SizeUInt = SizeOf(THAMTNode.refCount) + SizeOf(THAMTNode.pointerCount) + SizeOf(THAMTNode.itemCount) + SizeOf(THAMTNode.bitmapIsSinglePointer) + SizeOf(THAMTNode.bitmapIsValue);
 begin
   result := alignedGetMem(s);
   result^.refCount := 1;
@@ -601,12 +601,12 @@ var itemIndex: Integer;
   end;
 
 var
-  i: Integer;
+  i: SizeInt;
   h, index, h2: THAMTHash;
   offset: DWord;
   procedure moveItemsDown(itemsIsArray: boolean; items: pointer);
   var node : PHAMTNode;
-      dataOffset: integer;
+      dataOffset: SizeInt;
       oldItem: PItem;
       index2: THAMTHash;
   begin
@@ -756,13 +756,13 @@ class function THAMTNode.exclude(ppnode: PPHAMTNode; const item: TItem): Boolean
 var
   initialPPNode: PPHAMTNode;
   indices:  array[0..LEVEL_HIGH] of THAMTHash;
-  offsets:  array[0..LEVEL_HIGH] of integer; //offsets[i] := ... getPointerOffset(indices[i])
+  offsets:  array[0..LEVEL_HIGH] of SizeInt; //offsets[i] := ... getPointerOffset(indices[i])
   nodes:  array[0..LEVEL_HIGH] of PHAMTNode; //nodes[0] := ppnode^; nodes[i] := nodes[i-1].pointers[offsets[i-1]].raw
 
   //make sure nodes[0]..nodes[tillLevel] have ref count 0
-  function uniqueAncestorNodes(tillLevel: integer): pointer;
+  function uniqueAncestorNodes(tillLevel: SizeInt): pointer;
   var
-    i, offset: Integer;
+    i, offset: SizeInt;
   begin
     result := uniqueNode(initialPPNode);
     for i := 0 to tillLevel - 1 do begin
