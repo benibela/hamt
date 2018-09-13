@@ -174,7 +174,7 @@ type
     THAMTNode = specialize THAMTNode<TItem, TInfo>;
     PHAMTNode = ^THAMTNode;
     protected
-      fcount: SizeInt;
+      fcount: SizeUInt;
       froot: PHAMTNode;
       class procedure raiseItemError(const message: string; const item: TItem);
     public
@@ -191,7 +191,7 @@ type
       function getEnumerator: THAMTNode.THAMTEnumerator;
       destructor Destroy; override;
       //** Number of items in the set
-      property count: SizeInt read fcount;
+      property count: SizeUInt read fcount;
   end;
 
 
