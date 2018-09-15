@@ -68,6 +68,8 @@ type
   //** The HAMT node is either mutable (if reference counter is 1) or immutable with copy-on-write (if reference counter is >= 2) like strings. @br
   //** Using the nodes directly would be more efficient than using the map classes, since you have one less memory access without the class instance.
   generic THAMTNode<TItem, TInfo> = packed object
+    const
+      HAMTArrayEnd = -1;
     type
     PItem = ^TItem;
     {Invariants:
@@ -75,18 +77,19 @@ type
     - All keys in one THAMTArray have the same hash
     }
     PHAMTArray = ^THAMTArray;
+    THAMTArrayIndex = integer;
     THAMTArray = packed object
       refCount: Integer;
-      count: integer;
+      count: THAMTArrayIndex;
       firstItem: array[0..0] of TItem;
-      class function size(aCount: integer): SizeInt; static; inline;
-      class function allocate(acount: integer): PHAMTArray; static; //not initialized besides counts
+      class function size(aCount: THAMTArrayIndex): SizeInt; static; inline;
+      class function allocate(acount: THAMTArrayIndex): PHAMTArray; static; //not initialized besides counts
       class procedure decrementRefCount(a: PHAMTArray); static;
       procedure incrementChildrenRefCount;
-      function indexOf(const item: TItem): integer;
+      function indexOf(const item: TItem): THAMTArrayIndex;
       function find(const item: TItem): PItem;
-      function get(i: Integer): PItem; inline;
-      property items[i: Integer]: PItem read get; default;
+      function get(i: THAMTArrayIndex): PItem; inline;
+      property items[i: THAMTArrayIndex]: PItem read get; default;
       //todo: this can easily be extended to a multi map, by having multiple pairs with the same key
     end;
     PHAMTNode = ^THAMTNode;
@@ -353,12 +356,12 @@ end;
 
 
 
-class function THAMTNode.THAMTArray.size(aCount: integer): SizeInt;
+class function THAMTNode.THAMTArray.size(aCount: THAMTArrayIndex): SizeInt;
 begin
-  result := 2*sizeof(integer) + sizeof(TItem) * acount
+  result := sizeof(integer) + sizeof(THAMTArrayIndex) + sizeof(TItem) * acount
 end;
 
-class function THAMTNode.THAMTArray.allocate(acount: integer): PHAMTArray;
+class function THAMTNode.THAMTArray.allocate(acount: THAMTArrayIndex): PHAMTArray;
 begin
   result := alignedGetMem(size(acount)) ;
   result.refCount := 1;
@@ -367,14 +370,16 @@ end;
 
 class procedure THAMTNode.THAMTArray.decrementRefCount(a: PHAMTArray);
 var
-  i: Integer;
-  p: PItem;
+  p, e: PItem;
 begin
   with a^ do begin
-    p := @firstItem[0]; //use p[i] rather than pairs[i], because pairs[i] is not inlined
     if InterLockedDecrement(refCount) = 0 then begin
-      for i := 0 to count - 1 do
-        TInfo.release(p[i]);
+      p := @firstItem[0]; //use p[i] rather than pairs[i], because pairs[i] is not inlined
+      e := p + count;
+      while p < e do begin
+        TInfo.release(p^);
+        inc(p);
+      end;
       Freemem(a);
     end;
   end;
@@ -382,39 +387,46 @@ end;
 
 procedure THAMTNode.THAMTArray.incrementChildrenRefCount;
 var
-  i: Integer;
-  p: PItem;
+  p, e: PItem;
 begin
   p := @firstItem[0];
-  for i := 0 to count - 1 do
-    TInfo.addRef(p[i]);
+  e := p + count;
+  while p < e do begin
+    TInfo.addRef(p^);
+    inc(p);
+  end;
 end;
 
-function THAMTNode.THAMTArray.indexOf(const item: TItem): integer;
+function THAMTNode.THAMTArray.indexOf(const item: TItem): THAMTArrayIndex;
 var
-  i: Integer;
   p: PItem;
+  i: THAMTArrayIndex;
 begin
   p := @firstItem[0];
-  for i := 0 to count - 1 do
-    if TInfo.equal(p[i], item) then begin
+  i := 0;
+  while i < count do begin
+    if TInfo.equal(p[i], item) then
       exit(i);
-    end;
-  result := -1;
+    inc(i);
+  end;
+  result := HAMTArrayEnd;
 end;
 
 function THAMTNode.THAMTArray.find(const item: TItem): PItem;
 var
-  index: Integer;
+  p, e: PItem;
 begin
-  index := indexOf(item);
-  if index >= 0 then begin
-    result :=  @firstItem[0];
-    inc(result, index);
-  end else result := nil;
+  p := @firstItem[0];
+  e := p + count;
+  while p < e do begin
+    if TInfo.equal(p^, item) then
+      exit(p);
+    inc(p);
+  end;
+  result := nil;
 end;
 
-function THAMTNode.THAMTArray.get(i: Integer): PItem;
+function THAMTNode.THAMTArray.get(i: THAMTArrayIndex): PItem;
 begin
   result := @firstItem[0];
   inc(result, i);
@@ -578,7 +590,7 @@ end;
 class function THAMTNode.include(ppnode: PPHAMTNode; const item: TItem; allowOverride: boolean): Boolean;
 var itemHelper: specialize THAMTItemHelper<TItem>;
 
-var itemIndex: Integer;
+var itemIndex: THAMTArrayIndex;
   function cloneArrayAppend(hamtArrayx: pointer; append: boolean): pointer;
   var HAMTArray: PHAMTArray;
     oldItem: PItem;
@@ -682,15 +694,15 @@ begin
 
           }
           itemIndex := hamtArray.indexOf(item);
-          if (itemIndex >= 0) then begin
+          if (itemIndex <> HAMTArrayEnd) then begin
             result := false;
             if not allowOverride then exit;
           end;
-          if (itemIndex < 0) or (hamtArray.refCount > 1) then begin
-            hamtArray := cloneArrayAppend(hamtArray, itemIndex < 0);
+          if (itemIndex = HAMTArrayEnd) or (hamtArray.refCount > 1) then begin
+            hamtArray := cloneArrayAppend(hamtArray, itemIndex = HAMTArrayEnd);
             node.pointers[offset].setToArray(hamtArray);
           end;
-          if itemIndex >= 0 then
+          if itemIndex <> HAMTArrayEnd then
             TInfo.assignEqual(hamtArray^[itemIndex]^, item);
         end;
         exit;
@@ -814,7 +826,7 @@ var
 
 var
   hamtArray, newHamtArray: PHAMTArray;
-  itemIndex: integer;
+  itemIndex: THAMTArrayIndex;
   i: Integer;
   node: PHAMTNode;
   h, index: THAMTHash;
@@ -841,7 +853,7 @@ begin
         //remove from array
         hamtArray := PHAMTArray(rawPointer);
         itemIndex := hamtArray.indexOf(item);
-        if itemIndex < 0 then
+        if itemIndex = HAMTArrayEnd then
           exit(false);
         if hamtArray.count = 1 then begin
           deletePointerFromNode(i);
