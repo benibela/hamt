@@ -98,6 +98,8 @@ generic TReadOnlyMap<TKey, TValue, TInfo> = class(specialize TReadOnlyCustomSet<
     function contains(const key:TKey): boolean; inline;
     //** Returns the value for a certain key, or default value def if the map does not contain the key
     function get(const key: TKey; const def: TValue): TValue; inline;
+    //** Returns the value for a certain key, or default(TValue) if the map does not contain the key
+    function getOrDefault(const key: TKey): TValue; inline;
     //** Returns the value for a certain key, or raises an exception if the map does not contain the key
     function get(const key: TKey): TValue; inline;
     //** Default parameter, so you can read elements with @code(map[key])
@@ -313,6 +315,15 @@ var
 begin
   pair := find(key);
   if pair = nil then result := def
+  else result := pair.value;
+end;
+
+function TReadOnlyMap.getOrDefault(const key: TKey): TValue;
+var
+  pair: PPair;
+begin
+  pair := find(key);
+  if pair = nil then result := default(TValue)
   else result := pair.value;
 end;
 
