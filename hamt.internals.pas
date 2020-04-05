@@ -167,6 +167,11 @@ type
     class procedure release(var {%H-}k: TObject); inline;
     class function toString(const k: TObject): string; inline;
     class procedure assignEqual(var a: TObject; const b: TObject); inline; static;
+
+    class procedure addRef(var {%H-}k: pointer); inline;
+    class procedure release(var {%H-}k: pointer); inline;
+    class function toString(const k: pointer): string; inline;
+    class procedure assignEqual(var a: pointer; const b: pointer); inline; static;
   end;
 
   //** @abstract(Generic low-level read-only set)
@@ -338,6 +343,26 @@ end;
 class procedure THAMTTypeInfo.assignEqual(var a: TObject; const b: TObject);
 begin
   a := b;
+end;
+
+class procedure THAMTTypeInfo.addRef(var k: pointer);
+begin
+  //empty
+end;
+
+class procedure THAMTTypeInfo.release(var k: pointer);
+begin
+  //empty
+end;
+
+class function THAMTTypeInfo.toString(const k: pointer): string;
+begin
+  result := IntToHex(PtrUInt(k), sizeof(k)*2);
+end;
+
+class procedure THAMTTypeInfo.assignEqual(var a: pointer; const b: pointer);
+begin
+  a := b
 end;
 
 class procedure THAMTNode.hashShift(var hash: THAMTHash; out index: THAMTHash); inline;
