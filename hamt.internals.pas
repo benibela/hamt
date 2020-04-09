@@ -129,7 +129,7 @@ type
     class function allocateEmpty(): PHAMTNode; static; //memory initialized
   public
     //trigger copy-on-write so the node becomes mutable
-    class function uniqueNode(ppnode: PPHAMTNode): PHAMTNode;
+    class function uniqueNode(ppnode: PPHAMTNode): PHAMTNode; static;
     {
     //insert override allowed = true
       result = true                  inserted, no override
@@ -163,13 +163,13 @@ type
     class procedure assignEqual(var a: IUnknown; const b: IUnknown); inline; static;
 
     //no reference counting for objects
-    class procedure addRef(var {%H-}k: TObject); inline;
-    class procedure release(var {%H-}k: TObject); inline;
+    class procedure addRef(var {%H-}k: TObject); static; inline;
+    class procedure release(var {%H-}k: TObject); static;  inline;
     class function toString(const k: TObject): string; inline;
     class procedure assignEqual(var a: TObject; const b: TObject); inline; static;
 
-    class procedure addRef(var {%H-}k: pointer); inline;
-    class procedure release(var {%H-}k: pointer); inline;
+    class procedure addRef(var {%H-}k: pointer); static; inline;
+    class procedure release(var {%H-}k: pointer); static; inline;
     class function toString(const k: pointer): string; inline;
     class procedure assignEqual(var a: pointer; const b: pointer); inline; static;
   end;
