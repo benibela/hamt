@@ -141,6 +141,7 @@ type
     class function include(ppnode: PPHAMTNode; const item: TItem; allowOverride: boolean): Boolean; static;
     class function exclude(ppnode: PPHAMTNode; const item: TItem): Boolean; static;
     function find(const item: TItem): PItem;
+    class function findAndUnique(ppnode: PPHAMTNode; const item: TItem): PItem; static;
     function contains(const item: TItem): boolean;
   end;
 
@@ -960,6 +961,36 @@ begin
         exit(PHAMTArray(rawPointer).find(item))
        else
         node := PHAMTNode(rawPointer)
+    end else if node.bitmapIsValue.bits[index] then begin
+      result := node.getItemAddr(index);
+      if not TInfo.equal(result^, item) then result := nil;
+      exit;
+    end else
+      exit(nil);
+  end;
+  result := nil;
+end;
+
+class function THAMTNode.findAndUnique(ppnode: PPHAMTNode; const item: TItem): PItem; static;
+var
+  node: PHAMTNode;
+  i: Integer;
+  h, index: THAMTHash;
+  rawPointer: Pointer;
+  pointerIsArray: boolean;
+  offset: THAMTHash;
+begin
+  node := uniqueNode(ppnode);
+  h := TInfo.hash(item);
+  for i := 0 to LEVEL_HIGH do begin
+    hashShift(h, index);
+    if node.bitmapIsSinglePointer.bits[index] then begin
+      offset := node.getPointerOffset(index);
+      rawPointer := node.pointers[offset].unpack(pointerIsArray);
+      if pointerIsArray then
+        exit(PHAMTArray(rawPointer).find(item))
+       else
+        node := uniqueNode( PPHAMTNode(@node.pointers[offset].raw) );
     end else if node.bitmapIsValue.bits[index] then begin
       result := node.getItemAddr(index);
       if not TInfo.equal(result^, item) then result := nil;

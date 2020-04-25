@@ -578,6 +578,34 @@ begin
   imap2.Free;
   imap3.Free;
 
+  //mutable pointer
+  hamt := TMutableMap_Test.create;
+  hamt.testInsert('a', 'b');
+  hamt2 := TMutableMap_Test(hamt.clone);
+  hamt.mutable['a']^ := 'c';
+  hamt.testGet('a', 'c');
+  hamt2.testGet('a', 'b');
+  hamt.free;
+  hamt2.free;
+
+  hamt := TMutableMap_Test.create;
+  hamt.testInsert('_00_00_00', 'x1');
+  hamt.testInsert('_00_00_01', 'x2');
+  hamt.testInsert('_00_00_02', 'x3');
+  hamt2 := TMutableMap_Test(hamt.clone);
+  hamt.mutable['_00_00_00']^ := 'u';
+  hamt.mutable['_00_00_01']^ := 'v';
+  hamt.mutable['_00_00_02']^ := 'w';
+  hamt.testGet('_00_00_00', 'u');
+  hamt.testGet('_00_00_01', 'v');
+  hamt.testGet('_00_00_02', 'w');
+  hamt2.testGet('_00_00_00', 'x1');
+  hamt2.testGet('_00_00_01', 'x2');
+  hamt2.testGet('_00_00_02', 'x3');
+  hamt.free;
+  hamt2.free;
+
+  //sets
   setTestsMutable;
   setTestsImmutable;
 

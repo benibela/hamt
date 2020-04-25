@@ -139,6 +139,7 @@ Example:
 generic TMutableMap<TKey, TValue, TInfo> = class(specialize TReadOnlyMap<TKey, TValue, TInfo>)
 protected
   procedure includeItem(const key: TKey; const value: TValue); inline;
+  function getRef(const key: TKey): PValue;
 public
   //** Inserts a (key, value) pair, if allowOverride is true or key did not exist
   //** @returns If the map did not contain key
@@ -156,6 +157,8 @@ public
   function clone: TMutableMap;
   //** Default parameter, so you can read or write elements with @code(map[key])
   property items[key: TKey]: TValue read get write includeItem; default;
+  //** Pointer to value
+  property mutable[key: TKey]: PValue read getRef;
 end;
 
 {** @abstract(Generic immutable map)
@@ -342,6 +345,16 @@ end;
 procedure TMutableMap.includeItem(const key: TKey; const value: TValue);
 begin
   forceInclude(key, value, true);
+end;
+
+function TMutableMap.getRef(const key: TKey): PValue;
+var
+  pair: PPair;
+begin
+  pair := THAMTNode.findAndUnique(@froot, PPair(@key)^ ); //this cast should work, because key is the first element of TPair
+  if pair = nil then
+    raiseKeyError(rsMissingKey, key);
+  result := @pair.value;
 end;
 
 function TMutableMap.include(const key: TKey; const value: TValue; allowOverride: boolean): boolean;
